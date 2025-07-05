@@ -338,10 +338,10 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="relative mb-4 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border-2 border-dashed bg-muted">
+                    <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" autoPlay playsInline muted />
+                    
                     {isScanning ? (
                         <>
-                            <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" autoPlay playsInline muted />
-                            
                             <div 
                                 className="absolute inset-0 z-10" 
                                 style={{ boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.4)' }}
@@ -357,7 +357,9 @@ export default function DashboardPage() {
                             </div>
                         </>
                     ) : (
-                        <QrCode className="h-16 w-16 text-muted-foreground/50"/>
+                        <div className="absolute inset-0 flex items-center justify-center bg-muted">
+                            <QrCode className="h-16 w-16 text-muted-foreground/50"/>
+                        </div>
                     )}
                     <canvas ref={canvasRef} className="hidden" />
                 </div>
