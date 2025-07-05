@@ -24,8 +24,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Alert, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertTitle, AlertDescription as AlertDialogDescriptionUI } from "@/components/ui/alert";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
   TicketCheck,
   LogOut,
@@ -46,7 +48,9 @@ type DialogState = 'success' | 'duplicate' | 'not_found';
 export default function DashboardPage() {
   const router = useRouter();
   const { toast } = useToast();
-  
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+
   const [isAuthenticated, setIsAuthenticated] = React.useState(false);
   const [headers, setHeaders] = React.useState<string[]>([]);
   const [rows, setRows] = React.useState<Record<string, any>[]>([]);
@@ -54,10 +58,9 @@ export default function DashboardPage() {
   const [isAlertOpen, setIsAlertOpen] = React.useState(false);
   const [dialogState, setDialogState] = React.useState<DialogState>('not_found');
   
-  const videoRef = React.useRef<HTMLVideoElement>(null);
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const [isScanning, setIsScanning] = React.useState(false);
   const [scanError, setScanError] = React.useState<string | null>(null);
+  const [isContinuous, setIsContinuous] = React.useState(false);
 
   const form = useForm<z.infer<typeof checkInSchema>>({
     resolver: zodResolver(checkInSchema),
@@ -70,6 +73,22 @@ export default function DashboardPage() {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach((track) => track.stop());
       videoRef.current.srcObject = null;
+    }
+  }, []);
+  
+  const startScan = React.useCallback(async () => {
+    setScanError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setIsScanning(true);
+      }
+    } catch (err) {
+      console.error("Camera access error:", err);
+      setScanError("Camera access denied. Please enable it in your browser settings.");
+      setIsScanning(false);
     }
   }, []);
 
@@ -232,22 +251,6 @@ export default function DashboardPage() {
       return () => cancelAnimationFrame(animationFrameId);
     }
   }, [isScanning, tick]);
-  
-  const startScan = async () => {
-    setScanError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(e => console.error("Video play failed:", e));
-        setIsScanning(true);
-      }
-    } catch (err) {
-      console.error("Camera access error:", err);
-      setScanError("Camera access denied. Please enable it in your browser settings.");
-      setIsScanning(false);
-    }
-  };
 
   const handleScanButtonClick = () => {
     if (!isScanning) {
@@ -296,6 +299,28 @@ export default function DashboardPage() {
         description: "The attendee report has been downloaded."
     });
   };
+  
+  const handleAlertClose = React.useCallback(() => {
+      setIsAlertOpen(false);
+      form.reset();
+      // If continuous mode is on and we just closed an error/warning dialog, restart scanning.
+      if (isContinuous && (dialogState === 'duplicate' || dialogState === 'not_found')) {
+          startScan();
+      }
+  }, [isContinuous, dialogState, form, startScan]);
+
+  React.useEffect(() => {
+      // For successful scans in continuous mode, auto-close the dialog and restart scanning.
+      if (isContinuous && dialogState === 'success' && isAlertOpen) {
+          const timer = setTimeout(() => {
+              setIsAlertOpen(false);
+              form.reset();
+              startScan();
+          }, 1000); // 1-second delay
+
+          return () => clearTimeout(timer); // Cleanup timer
+      }
+  }, [isAlertOpen, dialogState, isContinuous, startScan, form]);
 
 
   if (!isAuthenticated) {
@@ -367,9 +392,13 @@ export default function DashboardPage() {
                     <Alert variant="destructive" className="mb-4">
                         <AlertTriangle className="h-4 w-4" />
                         <AlertTitle>Camera Error</AlertTitle>
-                        <AlertDialogDescription>{scanError}</AlertDialogDescription>
+                        <AlertDialogDescriptionUI>{scanError}</AlertDialogDescriptionUI>
                     </Alert>
                 )}
+                <div className="flex items-center space-x-2 mb-4">
+                    <Checkbox id="continuous-scan" checked={isContinuous} onCheckedChange={(checked) => setIsContinuous(!!checked)} />
+                    <Label htmlFor="continuous-scan" className="cursor-pointer">Liên tục</Label>
+                </div>
                 <Button type="button" onClick={handleScanButtonClick} className="w-full mb-4" variant="outline">
                     <Camera className="mr-2 h-4 w-4" />
                     {isScanning ? 'Stop Camera' : 'Scan QR Code'}
@@ -507,10 +536,7 @@ export default function DashboardPage() {
             </AlertDialogHeader>
           )}
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => {
-              setIsAlertOpen(false);
-              form.reset();
-            }}>
+            <AlertDialogAction onClick={handleAlertClose}>
               Close
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -519,3 +545,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
