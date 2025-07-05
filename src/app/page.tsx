@@ -31,8 +31,6 @@ import {
   QrCode,
   Download,
   UserCheck,
-  XCircle,
-  Info,
   AlertTriangle,
 } from "lucide-react";
 
@@ -45,11 +43,7 @@ type DialogState = 'success' | 'duplicate' | 'not_found';
 export default function DashboardPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const form = useForm<z.infer<typeof checkInSchema>>({
-    resolver: zodResolver(checkInSchema),
-    defaultValues: { uniqueCode: "" },
-  });
-
+  
   const [isAuthenticated, setIsAuthenticated] = React.useState(false);
   const [headers, setHeaders] = React.useState<string[]>([]);
   const [rows, setRows] = React.useState<Record<string, any>[]>([]);
@@ -57,6 +51,10 @@ export default function DashboardPage() {
   const [isAlertOpen, setIsAlertOpen] = React.useState(false);
   const [dialogState, setDialogState] = React.useState<DialogState>('not_found');
   
+  const form = useForm<z.infer<typeof checkInSchema>>({
+    resolver: zodResolver(checkInSchema),
+    defaultValues: { uniqueCode: "" },
+  });
 
   React.useEffect(() => {
     const authStatus = sessionStorage.getItem("isAuthenticated");
@@ -333,12 +331,12 @@ export default function DashboardPage() {
         <AlertDialogContent>
           {dialogState === 'success' && scannedRow && (
             <>
-              <AlertDialogHeader>
+              <AlertDialogHeader className="bg-accent text-accent-foreground p-4 -mx-6 -mt-6 sm:rounded-t-lg">
                 <AlertDialogTitle className="flex items-center gap-2">
-                  <UserCheck className="h-6 w-6 text-green-500" />
+                  <UserCheck className="h-6 w-6" />
                   Check-in Successful!
                 </AlertDialogTitle>
-                <AlertDialogDescription>
+                <AlertDialogDescription className="text-accent-foreground/90">
                     Welcome! Details for the attendee are below.
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -355,12 +353,12 @@ export default function DashboardPage() {
           )}
           {dialogState === 'duplicate' && scannedRow && (
             <>
-              <AlertDialogHeader>
-                <AlertDialogTitle className="flex items-center gap-2 text-orange-500 text-2xl">
+              <AlertDialogHeader className="bg-destructive text-destructive-foreground p-4 -mx-6 -mt-6 sm:rounded-t-lg">
+                <AlertDialogTitle className="flex items-center gap-2">
                   <AlertTriangle className="h-8 w-8" />
                   Already Checked In!
                 </AlertDialogTitle>
-                <AlertDialogDescription className="text-base">
+                <AlertDialogDescription className="text-destructive-foreground/90">
                   This ticket has already been scanned. Please verify the attendee.
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -377,12 +375,12 @@ export default function DashboardPage() {
             </>
           )}
           {dialogState === 'not_found' && (
-            <AlertDialogHeader>
+            <AlertDialogHeader className="bg-yellow-400 text-yellow-900 p-4 -mx-6 -mt-6 sm:rounded-t-lg">
                 <AlertDialogTitle className="flex items-center gap-2">
-                    <XCircle className="h-6 w-6 text-red-500" />
-                    Item Not Found
+                    <AlertTriangle className="h-6 w-6" />
+                    Ticket Not Found
                 </AlertDialogTitle>
-                <AlertDialogDescription>
+                <AlertDialogDescription className="text-yellow-900/90">
                     The scanned code does not match any entry in the list. Please try again.
                 </AlertDialogDescription>
             </AlertDialogHeader>
