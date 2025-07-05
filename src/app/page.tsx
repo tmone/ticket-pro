@@ -152,7 +152,7 @@ export default function DashboardPage() {
         if (!foundRow.checkedInTime) {
             // First time check-in
             const checkInTime = new Date();
-            const updatedRow = { ...foundRow, checkedInTime };
+            const updatedRow = { ...foundRow, checkedInTime: checkInTime };
             const updatedRows = [...rows];
             updatedRows[rowIndex] = updatedRow;
             setRows(updatedRows);
