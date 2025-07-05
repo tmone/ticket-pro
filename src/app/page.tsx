@@ -8,8 +8,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
 
-import type { Ticket } from "@/lib/types";
-
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -38,14 +36,18 @@ import {
 } from "lucide-react";
 
 const checkInSchema = z.object({
-  uniqueCode: z.string().min(1, { message: "QR code is required." }),
+  uniqueCode: z.string().min(1, { message: "Code is required." }),
 });
+
+type DialogState = 'success' | 'duplicate' | 'not_found';
 
 export default function DashboardPage() {
   const [isAuthenticated, setIsAuthenticated] = React.useState(false);
-  const [tickets, setTickets] = React.useState<Ticket[]>([]);
-  const [scannedTicket, setScannedTicket] = React.useState<Ticket | null | undefined>(null); // null: found, undefined: not found
+  const [headers, setHeaders] = React.useState<string[]>([]);
+  const [rows, setRows] = React.useState<Record<string, any>[]>([]);
+  const [scannedRow, setScannedRow] = React.useState<Record<string, any> | null | undefined>(null);
   const [isAlertOpen, setIsAlertOpen] = React.useState(false);
+  const [dialogState, setDialogState] = React.useState<DialogState>('not_found');
   
   const router = useRouter();
   const { toast } = useToast();
@@ -83,23 +85,31 @@ export default function DashboardPage() {
           throw new Error("Could not read file.");
         }
         
-        let parsedTickets: Ticket[];
-        if (fileName.endsWith('.csv')) {
-          parsedTickets = parseCSV(data as string);
-        } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-          parsedTickets = parseExcel(data as ArrayBuffer);
-        } else {
-          throw new Error("Unsupported file type. Please upload a CSV or Excel file.");
-        }
-        
-        if (parsedTickets.length === 0) {
-            throw new Error("No valid ticket data found in the file.");
+        if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+          throw new Error("Unsupported file type. Please upload an Excel file.");
         }
 
-        setTickets(parsedTickets);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet);
+
+        if (jsonData.length === 0) {
+            throw new Error("No data found in the Excel file.");
+        }
+        
+        const firstRow = jsonData[0];
+        const extractedHeaders = Object.keys(firstRow);
+        
+        const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
+
+        setHeaders(extractedHeaders);
+        setRows(initialRows);
+        setScannedRow(null);
+
         toast({
           title: "Success!",
-          description: `Successfully imported ${parsedTickets.length} tickets.`,
+          description: `Successfully imported ${jsonData.length} rows.`,
         });
       } catch (error: any) {
         toast({
@@ -109,7 +119,7 @@ export default function DashboardPage() {
         });
       }
     };
-
+    
     reader.onerror = () => {
         toast({
             variant: "destructive",
@@ -118,130 +128,71 @@ export default function DashboardPage() {
         });
     };
 
-    if (fileName.endsWith('.csv')) {
-      reader.readAsText(file);
-    } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
       reader.readAsArrayBuffer(file);
     } else {
         toast({
             variant: "destructive",
             title: "Unsupported File",
-            description: "Please upload a CSV or Excel (.xlsx, .xls) file.",
+            description: "Please upload an Excel (.xlsx, .xls) file.",
         });
     }
   };
   
-  const parseCSV = (csvText: string): Ticket[] => {
-      const lines = csvText.trim().split('\n');
-      if (lines.length < 2) return [];
-      
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s/g, ''));
-      const requiredHeaders = ['name', 'phone', 'email', 'seatrow', 'seatnumber', 'uniquecode'];
-      const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-
-      if (missingHeaders.length > 0) {
-          throw new Error(`Missing required CSV columns: ${missingHeaders.join(', ')}`);
-      }
-
-      return lines.slice(1).map((line) => {
-          const values = line.split(',');
-          const ticketData: any = {};
-          headers.forEach((header, index) => {
-              ticketData[header] = values[index]?.trim();
-          });
-
-          return {
-              name: ticketData.name,
-              phone: ticketData.phone,
-              email: ticketData.email,
-              seat: {
-                  row: ticketData.seatrow,
-                  number: ticketData.seatnumber,
-              },
-              uniqueCode: ticketData.uniquecode,
-              checkedInTime: null,
-          };
-      }).filter(t => t.uniqueCode);
-  };
-  
-  const parseExcel = (data: ArrayBuffer): Ticket[] => {
-      const workbook = XLSX.read(data, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const json = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" }) as any[][];
-
-      if (json.length < 2) return [];
-
-      const headers = (json[0] as any[]).map(h => h.toString().trim().toLowerCase().replace(/\s/g, ''));
-      const requiredHeaders = ['name', 'phone', 'email', 'seatrow', 'seatnumber', 'uniquecode'];
-      const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-
-      if (missingHeaders.length > 0) {
-          throw new Error(`Missing required Excel columns: ${missingHeaders.join(', ')}`);
-      }
-
-      const dataRows = json.slice(1);
-      
-      return dataRows.map((row: any[]) => {
-          const ticketData: any = {};
-          headers.forEach((header, index) => {
-              ticketData[header] = row[index] ? row[index].toString().trim() : '';
-          });
-
-          return {
-              name: ticketData.name,
-              phone: ticketData.phone,
-              email: ticketData.email,
-              seat: {
-                  row: ticketData.seatrow,
-                  number: ticketData.seatnumber,
-              },
-              uniqueCode: ticketData.uniquecode,
-              checkedInTime: null,
-          };
-      }).filter(t => t.uniqueCode);
-  };
-
-
   const handleCheckIn = (data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
-    const foundTicket = tickets.find((t) => t.uniqueCode === uniqueCode);
-    setScannedTicket(foundTicket);
-    setIsAlertOpen(true);
+    const trimmedCode = uniqueCode.trim();
 
-    if (foundTicket && !foundTicket.checkedInTime) {
-      setTickets(
-        tickets.map((t) =>
-          t.uniqueCode === uniqueCode
-            ? { ...t, checkedInTime: new Date() }
-            : t
-        )
-      );
+    const rowIndex = rows.findIndex(row => 
+        Object.values(row).some(cellValue => String(cellValue).trim() === trimmedCode)
+    );
+
+    if (rowIndex !== -1) {
+        const foundRow = rows[rowIndex];
+        if (!foundRow.checkedInTime) {
+            // First time check-in
+            const checkInTime = new Date();
+            const updatedRow = { ...foundRow, checkedInTime };
+            const updatedRows = [...rows];
+            updatedRows[rowIndex] = updatedRow;
+            setRows(updatedRows);
+            setScannedRow(updatedRow);
+            setDialogState('success');
+        } else {
+            // Already checked in
+            setScannedRow(foundRow);
+            setDialogState('duplicate');
+        }
+    } else {
+        setScannedRow(undefined); // Not found
+        setDialogState('not_found');
     }
+
+    setIsAlertOpen(true);
   };
   
   const handleExport = () => {
-    if (tickets.length === 0) {
+    if (rows.length === 0) {
         toast({
             variant: "destructive",
             title: "No Data",
-            description: "There is no ticket data to export."
+            description: "There is no data to export."
         });
         return;
     }
-    const headers = 'Name,Email,Phone,Seat,Unique Code,Checked-In At';
-    const rows = tickets.map(t => 
-        [
-            `"${t.name}"`,
-            `"${t.email}"`,
-            `"${t.phone}"`,
-            `"${t.seat.row}${t.seat.number}"`,
-            `"${t.uniqueCode}"`,
-            `"${t.checkedInTime ? format(t.checkedInTime, 'yyyy-MM-dd HH:mm:ss') : 'N/A'}"`
-        ].join(',')
-    );
 
-    const csvContent = [headers, ...rows].join('\n');
+    const dataToExport = rows.map(row => {
+        const newRow: Record<string, any> = {};
+        for (const header of headers) {
+            newRow[header] = row[header];
+        }
+        newRow['Checked-In At'] = row.checkedInTime ? format(row.checkedInTime, 'yyyy-MM-dd HH:mm:ss') : 'N/A';
+        return newRow;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const csvContent = XLSX.utils.sheet_to_csv(worksheet);
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     if (link.href) {
@@ -287,17 +238,17 @@ export default function DashboardPage() {
           <div className="grid auto-rows-max items-start gap-4 md:gap-8 lg:col-span-1">
             <Card>
               <CardHeader>
-                <CardTitle>Upload Ticket Data</CardTitle>
-                <CardDescription>Upload a CSV or Excel file. Columns: name, phone, email, seatRow, seatNumber, uniqueCode</CardDescription>
+                <CardTitle>Upload Data</CardTitle>
+                <CardDescription>Upload an Excel file. The first row should contain headers.</CardDescription>
               </CardHeader>
               <CardContent>
-                <Input id="data-upload" type="file" accept=".csv,.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleDataUpload} />
+                <Input id="data-upload" type="file" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleDataUpload} />
               </CardContent>
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Scan Ticket</CardTitle>
-                <CardDescription>Simulate a QR code scan by entering the unique code from the ticket.</CardDescription>
+                <CardTitle>Check In Attendee</CardTitle>
+                <CardDescription>Enter a unique code from your data to find and check in an attendee.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="relative mb-4 flex aspect-square w-full items-center justify-center rounded-lg border-2 border-dashed bg-muted animate-border-flash">
@@ -329,40 +280,42 @@ export default function DashboardPage() {
           <div className="lg:col-span-1 xl:col-span-2">
             <Card>
               <CardHeader>
-                  <CardTitle>Attendee List</CardTitle>
-                  <CardDescription>A list of all tickets and their check-in status.</CardDescription>
+                  <CardTitle>Data List</CardTitle>
+                  <CardDescription>A list of all imported rows and their check-in status.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="max-h-[600px] overflow-auto">
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead>Name</TableHead>
-                                <TableHead>Seat</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead>Checked In At</TableHead>
+                                {headers.map(header => <TableHead key={header}>{header}</TableHead>)}
+                                {headers.length > 0 && (
+                                    <>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead>Checked In At</TableHead>
+                                    </>
+                                )}
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {tickets.length > 0 ? (
-                                tickets.map(ticket => (
-                                    <TableRow key={ticket.uniqueCode}>
-                                        <TableCell className="font-medium">{ticket.name}</TableCell>
-                                        <TableCell>{ticket.seat.row}{ticket.seat.number}</TableCell>
+                            {rows.length > 0 ? (
+                                rows.map((row, rowIndex) => (
+                                    <TableRow key={rowIndex}>
+                                        {headers.map(header => <TableCell key={header}>{String(row[header] ?? '')}</TableCell>)}
                                         <TableCell>
-                                            <Badge variant={ticket.checkedInTime ? "default" : "secondary"} className={ticket.checkedInTime ? "bg-accent text-accent-foreground" : ""}>
-                                                {ticket.checkedInTime ? "Checked In" : "Pending"}
+                                            <Badge variant={row.checkedInTime ? "default" : "secondary"} className={row.checkedInTime ? "bg-accent text-accent-foreground" : ""}>
+                                                {row.checkedInTime ? "Checked In" : "Pending"}
                                             </Badge>
                                         </TableCell>
                                         <TableCell>
-                                            {ticket.checkedInTime ? format(ticket.checkedInTime, 'PPpp') : 'N/A'}
+                                            {row.checkedInTime ? format(row.checkedInTime, 'PPpp') : 'N/A'}
                                         </TableCell>
                                     </TableRow>
                                 ))
                             ) : (
                                 <TableRow>
-                                    <TableCell colSpan={4} className="h-24 text-center">
-                                        No tickets uploaded yet.
+                                    <TableCell colSpan={headers.length > 0 ? headers.length + 2 : 1} className="h-24 text-center">
+                                        No data uploaded yet.
                                     </TableCell>
                                 </TableRow>
                             )}
@@ -377,51 +330,60 @@ export default function DashboardPage() {
 
       <AlertDialog open={isAlertOpen} onOpenChange={setIsAlertOpen}>
         <AlertDialogContent>
-          {scannedTicket ? (
-            <>
-              <AlertDialogHeader>
-                {scannedTicket.checkedInTime ? (
-                  <>
-                    <AlertDialogTitle className="flex items-center gap-2">
-                      <UserCheck className="h-6 w-6 text-green-500" />
-                      Check-in Successful!
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>Welcome, {scannedTicket.name}!</AlertDialogDescription>
-                  </>
-                ) : (
-                  <>
-                    <AlertDialogTitle className="flex items-center gap-2">
-                      <Info className="h-6 w-6 text-blue-500" />
-                      Already Checked In
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This ticket for {scannedTicket.name} was already used.
-                    </AlertDialogDescription>
-                  </>
-                )}
-              </AlertDialogHeader>
-              <div className="text-sm">
-                <p><strong>Name:</strong> {scannedTicket.name}</p>
-                <p><strong>Seat:</strong> {scannedTicket.seat.row}{scannedTicket.seat.number}</p>
-                <p><strong>Email:</strong> {scannedTicket.email}</p>
-                <p>
-                  <strong>Initial Check-in:</strong>{" "}
-                  {format(scannedTicket.checkedInTime || new Date(), 'PPpp')}
-                </p>
-              </div>
-            </>
-          ) : (
+          {dialogState === 'success' && scannedRow && (
             <>
               <AlertDialogHeader>
                 <AlertDialogTitle className="flex items-center gap-2">
-                    <XCircle className="h-6 w-6 text-red-500" />
-                    Ticket Not Found
+                  <UserCheck className="h-6 w-6 text-green-500" />
+                  Check-in Successful!
                 </AlertDialogTitle>
                 <AlertDialogDescription>
-                    The scanned QR code does not match any ticket in the list. Please try again.
+                    Welcome! Details for the attendee are below.
                 </AlertDialogDescription>
               </AlertDialogHeader>
+              <div className="text-sm space-y-1 max-h-60 overflow-auto">
+                {Object.entries(scannedRow).filter(([key]) => key !== 'checkedInTime').map(([key, value]) => (
+                    <p key={key}><strong>{key}:</strong> {String(value)}</p>
+                ))}
+                <p>
+                  <strong>Checked-in:</strong>{" "}
+                  {scannedRow.checkedInTime ? format(scannedRow.checkedInTime, 'PPpp') : 'N/A'}
+                </p>
+              </div>
             </>
+          )}
+          {dialogState === 'duplicate' && scannedRow && (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <Info className="h-6 w-6 text-blue-500" />
+                  Already Checked In
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This item has already been checked in.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="text-sm space-y-1 max-h-60 overflow-auto">
+                {Object.entries(scannedRow).filter(([key]) => key !== 'checkedInTime').map(([key, value]) => (
+                    <p key={key}><strong>{key}:</strong> {String(value)}</p>
+                ))}
+                <p>
+                  <strong>Initial Check-in:</strong>{" "}
+                  {scannedRow.checkedInTime ? format(scannedRow.checkedInTime, 'PPpp') : 'N/A'}
+                </p>
+              </div>
+            </>
+          )}
+          {dialogState === 'not_found' && (
+            <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                    <XCircle className="h-6 w-6 text-red-500" />
+                    Item Not Found
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                    The scanned code does not match any entry in the list. Please try again.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
           )}
           <AlertDialogFooter>
             <AlertDialogAction onClick={() => {
