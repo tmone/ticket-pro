@@ -176,7 +176,7 @@ export default function DashboardPage() {
 
     const rowIndex = rows.findIndex(row =>
       Object.values(row).some(
-        cellValue => String(cellValue).trim() === searchCode
+        cellValue => String(cellValue).trim().toLowerCase() === searchCode.toLowerCase()
       )
     );
 
