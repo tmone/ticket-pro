@@ -337,9 +337,25 @@ export default function DashboardPage() {
                 <CardDescription>Enter a unique code or scan a QR code to check in an attendee.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="relative mb-4 flex aspect-square w-full items-center justify-center rounded-lg border-2 border-dashed bg-muted">
+                <div className="relative mb-4 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border-2 border-dashed bg-muted">
                     {isScanning ? (
-                        <video ref={videoRef} className="h-full w-full object-cover rounded-md" autoPlay playsInline muted />
+                        <>
+                            <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" autoPlay playsInline muted />
+                            
+                            <div 
+                                className="absolute inset-0 z-10" 
+                                style={{ boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.4)' }}
+                            >
+                                <div className="pointer-events-none absolute top-1/2 left-1/2 h-3/4 w-3/4 max-w-[400px] max-h-[400px] -translate-x-1/2 -translate-y-1/2 rounded-lg" />
+                            </div>
+
+                            <div className="pointer-events-none relative z-20 h-3/4 w-3/4 max-w-[400px] max-h-[400px]">
+                                <div className="absolute -top-1 -left-1 h-10 w-10 border-t-4 border-l-4 border-primary rounded-tl-lg"></div>
+                                <div className="absolute -top-1 -right-1 h-10 w-10 border-t-4 border-r-4 border-primary rounded-tr-lg"></div>
+                                <div className="absolute -bottom-1 -left-1 h-10 w-10 border-b-4 border-l-4 border-primary rounded-bl-lg"></div>
+                                <div className="absolute -bottom-1 -right-1 h-10 w-10 border-b-4 border-r-4 border-primary rounded-br-lg"></div>
+                            </div>
+                        </>
                     ) : (
                         <QrCode className="h-16 w-16 text-muted-foreground/50"/>
                     )}
