@@ -6,6 +6,7 @@ import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
+import * as XLSX from "xlsx";
 
 import type { Ticket } from "@/lib/types";
 
@@ -24,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import {
   TicketCheck,
   LogOut,
@@ -34,7 +35,6 @@ import {
   UserCheck,
   XCircle,
   Info,
-  Users
 } from "lucide-react";
 
 const checkInSchema = z.object({
@@ -74,31 +74,68 @@ export default function DashboardPage() {
     if (!file) return;
 
     const reader = new FileReader();
+    const fileName = file.name.toLowerCase();
+
     reader.onload = (e) => {
-      const text = e.target?.result as string;
       try {
-        const parsedTickets = parseCSV(text);
+        const data = e.target?.result;
+        if (!data) {
+          throw new Error("Could not read file.");
+        }
+        
+        let parsedTickets: Ticket[];
+        if (fileName.endsWith('.csv')) {
+          parsedTickets = parseCSV(data as string);
+        } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+          parsedTickets = parseExcel(data as ArrayBuffer);
+        } else {
+          throw new Error("Unsupported file type. Please upload a CSV or Excel file.");
+        }
+        
+        if (parsedTickets.length === 0) {
+            throw new Error("No valid ticket data found in the file.");
+        }
+
         setTickets(parsedTickets);
         toast({
           title: "Success!",
           description: `Successfully imported ${parsedTickets.length} tickets.`,
         });
-      } catch (error) {
+      } catch (error: any) {
         toast({
           variant: "destructive",
           title: "Import Failed",
-          description: "Please check the CSV format and try again.",
+          description: error.message || "Please check the file format and try again.",
         });
       }
     };
-    reader.readAsText(file);
+
+    reader.onerror = () => {
+        toast({
+            variant: "destructive",
+            title: "File Read Error",
+            description: "There was an error reading the file.",
+        });
+    };
+
+    if (fileName.endsWith('.csv')) {
+      reader.readAsText(file);
+    } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      reader.readAsArrayBuffer(file);
+    } else {
+        toast({
+            variant: "destructive",
+            title: "Unsupported File",
+            description: "Please upload a CSV or Excel (.xlsx, .xls) file.",
+        });
+    }
   };
   
   const parseCSV = (csvText: string): Ticket[] => {
       const lines = csvText.trim().split('\n');
       if (lines.length < 2) return [];
       
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s/g, ''));
       const requiredHeaders = ['name', 'phone', 'email', 'seatrow', 'seatnumber', 'uniquecode'];
       const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
 
@@ -110,7 +147,7 @@ export default function DashboardPage() {
           const values = line.split(',');
           const ticketData: any = {};
           headers.forEach((header, index) => {
-              ticketData[header.replace(/\s/g, '')] = values[index]?.trim();
+              ticketData[header] = values[index]?.trim();
           });
 
           return {
@@ -124,7 +161,45 @@ export default function DashboardPage() {
               uniqueCode: ticketData.uniquecode,
               checkedInTime: null,
           };
-      });
+      }).filter(t => t.uniqueCode);
+  };
+  
+  const parseExcel = (data: ArrayBuffer): Ticket[] => {
+      const workbook = XLSX.read(data, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const json = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" }) as any[][];
+
+      if (json.length < 2) return [];
+
+      const headers = (json[0] as any[]).map(h => h.toString().trim().toLowerCase().replace(/\s/g, ''));
+      const requiredHeaders = ['name', 'phone', 'email', 'seatrow', 'seatnumber', 'uniquecode'];
+      const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+
+      if (missingHeaders.length > 0) {
+          throw new Error(`Missing required Excel columns: ${missingHeaders.join(', ')}`);
+      }
+
+      const dataRows = json.slice(1);
+      
+      return dataRows.map((row: any[]) => {
+          const ticketData: any = {};
+          headers.forEach((header, index) => {
+              ticketData[header] = row[index] ? row[index].toString().trim() : '';
+          });
+
+          return {
+              name: ticketData.name,
+              phone: ticketData.phone,
+              email: ticketData.email,
+              seat: {
+                  row: ticketData.seatrow,
+                  number: ticketData.seatnumber,
+              },
+              uniqueCode: ticketData.uniquecode,
+              checkedInTime: null,
+          };
+      }).filter(t => t.uniqueCode);
   };
 
 
@@ -213,10 +288,10 @@ export default function DashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Upload Ticket Data</CardTitle>
-                <CardDescription>Upload a CSV file with ticket information. Columns: name, phone, email, seatRow, seatNumber, uniqueCode</CardDescription>
+                <CardDescription>Upload a CSV or Excel file. Columns: name, phone, email, seatRow, seatNumber, uniqueCode</CardDescription>
               </CardHeader>
               <CardContent>
-                <Input id="csv-upload" type="file" accept=".csv" onChange={handleDataUpload} />
+                <Input id="data-upload" type="file" accept=".csv,.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleDataUpload} />
               </CardContent>
             </Card>
             <Card>
