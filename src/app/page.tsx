@@ -201,17 +201,29 @@ export default function DashboardPage() {
 
     if (rowIndex !== -1) {
       const foundRow = rows[rowIndex];
-      if (!foundRow.checkedInTime) {
-        const checkInTime = new Date();
-        const updatedRow = { ...foundRow, checkedInTime: checkInTime };
+      const now = new Date();
+      
+      if (foundRow.checkedInTime) {
+        const checkedInDate = new Date(foundRow.checkedInTime);
+        const secondsSinceCheckIn = (now.getTime() - checkedInDate.getTime()) / 1000;
+
+        if (secondsSinceCheckIn < 60) {
+          // Within 60s grace period, treat as success
+          setScannedRow(foundRow);
+          setDialogState('success');
+        } else {
+          // After 60s, it's a duplicate
+          setScannedRow(foundRow);
+          setDialogState('duplicate');
+        }
+      } else {
+        // First time check-in
+        const updatedRow = { ...foundRow, checkedInTime: now };
         const updatedRows = [...rows];
         updatedRows[rowIndex] = updatedRow;
         setRows(updatedRows);
         setScannedRow(updatedRow);
         setDialogState('success');
-      } else {
-        setScannedRow(foundRow);
-        setDialogState('duplicate');
       }
     } else {
       setScannedRow(undefined);
@@ -545,5 +557,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
