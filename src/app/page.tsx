@@ -33,6 +33,7 @@ import {
   UserCheck,
   XCircle,
   Info,
+  AlertTriangle,
 } from "lucide-react";
 
 const checkInSchema = z.object({
@@ -42,6 +43,13 @@ const checkInSchema = z.object({
 type DialogState = 'success' | 'duplicate' | 'not_found';
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const { toast } = useToast();
+  const form = useForm<z.infer<typeof checkInSchema>>({
+    resolver: zodResolver(checkInSchema),
+    defaultValues: { uniqueCode: "" },
+  });
+
   const [isAuthenticated, setIsAuthenticated] = React.useState(false);
   const [headers, setHeaders] = React.useState<string[]>([]);
   const [rows, setRows] = React.useState<Record<string, any>[]>([]);
@@ -49,13 +57,6 @@ export default function DashboardPage() {
   const [isAlertOpen, setIsAlertOpen] = React.useState(false);
   const [dialogState, setDialogState] = React.useState<DialogState>('not_found');
   
-  const router = useRouter();
-  const { toast } = useToast();
-
-  const form = useForm<z.infer<typeof checkInSchema>>({
-    resolver: zodResolver(checkInSchema),
-    defaultValues: { uniqueCode: "" },
-  });
 
   React.useEffect(() => {
     const authStatus = sessionStorage.getItem("isAuthenticated");
@@ -355,20 +356,21 @@ export default function DashboardPage() {
           {dialogState === 'duplicate' && scannedRow && (
             <>
               <AlertDialogHeader>
-                <AlertDialogTitle className="flex items-center gap-2">
-                  <Info className="h-6 w-6 text-blue-500" />
-                  Already Checked In
+                <AlertDialogTitle className="flex items-center gap-2 text-orange-500 text-2xl">
+                  <AlertTriangle className="h-8 w-8" />
+                  Already Checked In!
                 </AlertDialogTitle>
-                <AlertDialogDescription>
-                  This item has already been checked in.
+                <AlertDialogDescription className="text-base">
+                  This ticket has already been scanned. Please verify the attendee.
                 </AlertDialogDescription>
               </AlertDialogHeader>
-              <div className="text-sm space-y-1 max-h-60 overflow-auto">
+              <div className="text-sm space-y-2 max-h-60 overflow-auto rounded-md border bg-muted p-4">
+                <p className="font-bold text-lg mb-2">Original Check-in Details:</p>
                 {Object.entries(scannedRow).filter(([key]) => key !== 'checkedInTime').map(([key, value]) => (
                     <p key={key}><strong>{key}:</strong> {String(value)}</p>
                 ))}
-                <p>
-                  <strong>Initial Check-in:</strong>{" "}
+                <p className="mt-2">
+                  <strong>Initial Check-in Time:</strong>{" "}
                   {scannedRow.checkedInTime ? format(scannedRow.checkedInTime, 'PPpp') : 'N/A'}
                 </p>
               </div>
