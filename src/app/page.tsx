@@ -140,31 +140,43 @@ export default function DashboardPage() {
   
   const handleCheckIn = (data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
-    const trimmedCode = uniqueCode.trim();
+    let searchCode = uniqueCode.trim();
 
-    const rowIndex = rows.findIndex(row => 
-        Object.values(row).some(cellValue => String(cellValue).trim() === trimmedCode)
+    try {
+      const url = new URL(searchCode);
+      const firstParam = url.searchParams.values().next().value;
+      if (firstParam) {
+        searchCode = firstParam.trim();
+      }
+    } catch (e) {
+      // Not a URL, continue with the original code
+    }
+
+    const rowIndex = rows.findIndex(row =>
+      Object.values(row).some(
+        cellValue => String(cellValue).trim() === searchCode
+      )
     );
 
     if (rowIndex !== -1) {
-        const foundRow = rows[rowIndex];
-        if (!foundRow.checkedInTime) {
-            // First time check-in
-            const checkInTime = new Date();
-            const updatedRow = { ...foundRow, checkedInTime: checkInTime };
-            const updatedRows = [...rows];
-            updatedRows[rowIndex] = updatedRow;
-            setRows(updatedRows);
-            setScannedRow(updatedRow);
-            setDialogState('success');
-        } else {
-            // Already checked in
-            setScannedRow(foundRow);
-            setDialogState('duplicate');
-        }
+      const foundRow = rows[rowIndex];
+      if (!foundRow.checkedInTime) {
+        // First time check-in
+        const checkInTime = new Date();
+        const updatedRow = { ...foundRow, checkedInTime: checkInTime };
+        const updatedRows = [...rows];
+        updatedRows[rowIndex] = updatedRow;
+        setRows(updatedRows);
+        setScannedRow(updatedRow);
+        setDialogState('success');
+      } else {
+        // Already checked in
+        setScannedRow(foundRow);
+        setDialogState('duplicate');
+      }
     } else {
-        setScannedRow(undefined); // Not found
-        setDialogState('not_found');
+      setScannedRow(undefined); // Not found
+      setDialogState('not_found');
     }
 
     setIsAlertOpen(true);
