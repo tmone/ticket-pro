@@ -7,6 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
+import jsQR from "jsqr";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertTitle } from "@/components/ui/alert";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import {
   TicketCheck,
@@ -32,6 +34,7 @@ import {
   Download,
   UserCheck,
   AlertTriangle,
+  Camera,
 } from "lucide-react";
 
 const checkInSchema = z.object({
@@ -51,10 +54,24 @@ export default function DashboardPage() {
   const [isAlertOpen, setIsAlertOpen] = React.useState(false);
   const [dialogState, setDialogState] = React.useState<DialogState>('not_found');
   
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const [isScanning, setIsScanning] = React.useState(false);
+  const [scanError, setScanError] = React.useState<string | null>(null);
+
   const form = useForm<z.infer<typeof checkInSchema>>({
     resolver: zodResolver(checkInSchema),
     defaultValues: { uniqueCode: "" },
   });
+
+  const stopScan = React.useCallback(() => {
+    setIsScanning(false);
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((track) => track.stop());
+      videoRef.current.srcObject = null;
+    }
+  }, []);
 
   React.useEffect(() => {
     const authStatus = sessionStorage.getItem("isAuthenticated");
@@ -63,7 +80,12 @@ export default function DashboardPage() {
     } else {
       setIsAuthenticated(true);
     }
-  }, [router]);
+    
+    // Cleanup camera on component unmount
+    return () => {
+      stopScan();
+    };
+  }, [router, stopScan]);
 
   const handleLogout = () => {
     sessionStorage.removeItem("isAuthenticated");
@@ -137,8 +159,8 @@ export default function DashboardPage() {
         });
     }
   };
-  
-  const handleCheckIn = (data: z.infer<typeof checkInSchema>) => {
+
+  const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
     let searchCode = uniqueCode.trim();
 
@@ -161,7 +183,6 @@ export default function DashboardPage() {
     if (rowIndex !== -1) {
       const foundRow = rows[rowIndex];
       if (!foundRow.checkedInTime) {
-        // First time check-in
         const checkInTime = new Date();
         const updatedRow = { ...foundRow, checkedInTime: checkInTime };
         const updatedRows = [...rows];
@@ -170,18 +191,72 @@ export default function DashboardPage() {
         setScannedRow(updatedRow);
         setDialogState('success');
       } else {
-        // Already checked in
         setScannedRow(foundRow);
         setDialogState('duplicate');
       }
     } else {
-      setScannedRow(undefined); // Not found
+      setScannedRow(undefined);
       setDialogState('not_found');
     }
 
     setIsAlertOpen(true);
-  };
+  }, [rows]);
+
+  const tick = React.useCallback(() => {
+    if (isScanning && videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext("2d");
+
+        if (ctx) {
+            canvas.height = video.videoHeight;
+            canvas.width = video.videoWidth;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+            if (code && code.data) {
+                stopScan();
+                form.setValue("uniqueCode", code.data, { shouldValidate: true });
+                form.handleSubmit(handleCheckIn)();
+                return;
+            }
+        }
+    }
+    requestAnimationFrame(tick);
+  }, [isScanning, stopScan, form, handleCheckIn]);
+
+  React.useEffect(() => {
+    if (isScanning) {
+      const animationFrameId = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(animationFrameId);
+    }
+  }, [isScanning, tick]);
   
+  const startScan = async () => {
+    setScanError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(e => console.error("Video play failed:", e));
+        setIsScanning(true);
+      }
+    } catch (err) {
+      console.error("Camera access error:", err);
+      setScanError("Camera access denied. Please enable it in your browser settings.");
+      setIsScanning(false);
+    }
+  };
+
+  const handleScanButtonClick = () => {
+    if (!isScanning) {
+      startScan();
+    } else {
+      stopScan();
+    }
+  };
+
   const handleExport = () => {
     if (rows.length === 0) {
         toast({
@@ -259,12 +334,28 @@ export default function DashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Check In Attendee</CardTitle>
-                <CardDescription>Enter a unique code from your data to find and check in an attendee.</CardDescription>
+                <CardDescription>Enter a unique code or scan a QR code to check in an attendee.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="relative mb-4 flex aspect-square w-full items-center justify-center rounded-lg border-2 border-dashed bg-muted animate-border-flash">
-                    <QrCode className="h-16 w-16 text-muted-foreground/50"/>
+                <div className="relative mb-4 flex aspect-square w-full items-center justify-center rounded-lg border-2 border-dashed bg-muted">
+                    {isScanning ? (
+                        <video ref={videoRef} className="h-full w-full object-cover rounded-md" autoPlay playsInline muted />
+                    ) : (
+                        <QrCode className="h-16 w-16 text-muted-foreground/50"/>
+                    )}
+                    <canvas ref={canvasRef} className="hidden" />
                 </div>
+                {scanError && (
+                    <Alert variant="destructive" className="mb-4">
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertTitle>Camera Error</AlertTitle>
+                        <AlertDialogDescription>{scanError}</AlertDialogDescription>
+                    </Alert>
+                )}
+                <Button type="button" onClick={handleScanButtonClick} className="w-full mb-4" variant="outline">
+                    <Camera className="mr-2 h-4 w-4" />
+                    {isScanning ? 'Stop Camera' : 'Scan QR Code'}
+                </Button>
                 <Form {...form}>
                     <form onSubmit={form.handleSubmit(handleCheckIn)} className="space-y-4">
                         <FormField
