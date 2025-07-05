@@ -50,6 +50,11 @@ export default function DashboardPage() {
   const router = useRouter();
   const { toast } = useToast();
 
+  const form = useForm<z.infer<typeof checkInSchema>>({
+    resolver: zodResolver(checkInSchema),
+    defaultValues: { uniqueCode: "" },
+  });
+
   React.useEffect(() => {
     const authStatus = sessionStorage.getItem("isAuthenticated");
     if (authStatus !== "true") {
@@ -185,11 +190,6 @@ export default function DashboardPage() {
     return <div className="flex h-screen w-full items-center justify-center">Loading...</div>;
   }
   
-  const form = useForm<z.infer<typeof checkInSchema>>({
-    resolver: zodResolver(checkInSchema),
-    defaultValues: { uniqueCode: "" },
-  });
-
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
