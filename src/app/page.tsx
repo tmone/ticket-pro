@@ -66,7 +66,7 @@ export default function DashboardPage() {
     resolver: zodResolver(checkInSchema),
     defaultValues: { uniqueCode: "" },
   });
-
+  
   const stopScan = React.useCallback(() => {
     setIsScanning(false);
     if (videoRef.current && videoRef.current.srcObject) {
@@ -317,7 +317,8 @@ export default function DashboardPage() {
       form.reset();
       // If continuous mode is on and we just closed an error/warning dialog, restart scanning.
       if (isContinuous && (dialogState === 'duplicate' || dialogState === 'not_found')) {
-          startScan();
+           // Use a timeout to defer the startScan call, allowing the state to update properly first.
+           setTimeout(() => startScan(), 0);
       }
   }, [isContinuous, dialogState, form, startScan]);
 
@@ -508,7 +509,7 @@ export default function DashboardPage() {
                 ))}
                 <p>
                   <strong>Checked-in:</strong>{" "}
-                  {scannedRow.checkedInTime ? format(scannedRow.checkedInTime, 'PPpp') : 'N/A'}
+                  {scannedRow.checkedInTime ? format(new Date(scannedRow.checkedInTime), 'PPpp') : 'N/A'}
                 </p>
               </div>
             </>
@@ -531,7 +532,7 @@ export default function DashboardPage() {
                 ))}
                 <p className="mt-2">
                   <strong>Initial Check-in Time:</strong>{" "}
-                  {scannedRow.checkedInTime ? format(scannedRow.checkedInTime, 'PPpp') : 'N/A'}
+                  {scannedRow.checkedInTime ? format(new Date(scannedRow.checkedInTime), 'PPpp') : 'N/A'}
                 </p>
               </div>
             </>
