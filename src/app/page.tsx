@@ -85,8 +85,7 @@ export default function DashboardPage() {
   });
 
   React.useEffect(() => {
-    // Fetch session data, but don't redirect.
-    // The UI will adapt based on whether the session is active or not.
+    // Fetch session data to update UI (e.g., show user avatar)
     getSession().then(setSession);
   }, []);
 
@@ -129,7 +128,7 @@ export default function DashboardPage() {
   const handleLogout = async () => {
     await logout();
     setSession(null); // Clear session state on client
-    router.push("/login"); // Optional: redirect to login page after logout
+    // No need to redirect, the page will just show the login button
   };
 
   const processSheetData = (jsonData: Record<string, any>[]) => {
@@ -166,11 +165,13 @@ export default function DashboardPage() {
       const result = await fetchGoogleSheetData(data.url);
       
       if (result.error) {
-        // If the error is about authentication, redirect to login.
+        // If the error is about authentication, redirect to login to get permissions.
+        // This is the key change to fix the 403 issue.
         if (result.error.includes('Authentication required')) {
           router.push('/api/auth/login/google');
-          return;
+          return; // Stop execution here
         }
+        // For other errors, just show the message.
         throw new Error(result.error);
       }
 
