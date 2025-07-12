@@ -270,8 +270,7 @@ export default function DashboardPage() {
     }
 
     const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
-      defval: '',
-      header: 1, // Read as an array of arrays
+      defval: ''
     });
 
     if (jsonData.length < 1) {
@@ -285,18 +284,16 @@ export default function DashboardPage() {
       return;
     }
     
-    const headerRow = jsonData[0] as string[];
-    const dataRows = jsonData.slice(1);
-
-    const extractedHeaders = headerRow.map(h => String(h));
-
-    const processedRows = dataRows.map((rowArray: any[]) => {
-      const rowObject: Record<string, any> = { checkedInTime: null };
-      extractedHeaders.forEach((header, index) => {
-        rowObject[header] = rowArray[index];
-      });
-      return rowObject;
+    const headerSet = new Set<string>();
+    jsonData.forEach(row => {
+        Object.keys(row).forEach(key => headerSet.add(key));
     });
+    const extractedHeaders = Array.from(headerSet);
+
+    const processedRows = jsonData.map((row) => ({
+      ...row,
+      checkedInTime: null,
+    }));
 
     setHeaders(extractedHeaders);
     setRows(processedRows);
@@ -393,49 +390,55 @@ export default function DashboardPage() {
         return;
     }
 
-    // Deep copy the workbook to avoid mutating the original state object.
-    const newWorkbook = JSON.parse(JSON.stringify(workbook));
-
-    const ws = newWorkbook.Sheets[activeSheetName];
-    if (!ws) {
-        toast({
-          variant: "destructive",
-          title: "Sheet Error",
-          description: `Could not find sheet "${activeSheetName}" in the workbook.`
-        });
-        return;
-    }
-    
-    // Find the next available column for "Checked-In At"
-    const headerAddress = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1').s; // Start of the sheet
-    let checkInColIndex = 0;
-    while(true) {
-        const cellAddress = XLSX.utils.encode_cell({c: checkInColIndex, r: headerAddress.r});
-        if (!ws[cellAddress]) break;
-        checkInColIndex++;
-    }
-
-    // Add the "Checked-In At" header
-    const checkInHeaderAddress = XLSX.utils.encode_cell({c: checkInColIndex, r: headerAddress.r});
-    XLSX.utils.sheet_add_aoa(ws, [["Checked-In At"]], { origin: checkInHeaderAddress });
-
-    // Iterate through checked-in rows and update the sheet
-    rows.forEach((row, rowIndex) => {
-        if (row.checkedInTime) {
-            const cellAddress = XLSX.utils.encode_cell({c: checkInColIndex, r: rowIndex + 1 + headerAddress.r }); // +1 for header row
-            const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
-            XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
-        }
-    });
-    
-    // Update the sheet's range to include the new column
-    const range = XLSX.utils.decode_range(ws['!ref']!);
-    if (range.e.c < checkInColIndex) {
-        range.e.c = checkInColIndex;
-    }
-    ws['!ref'] = XLSX.utils.encode_range(range);
-
     try {
+        // Create a deep copy of the workbook to avoid mutating state directly
+        // Note: This is a shallow copy of sheets, but we'll be replacing one sheet entirely.
+        // A proper deep copy is complex with xlsx, but this approach is safe.
+        const newWorkbook: WorkBook = {
+            ...workbook,
+            Sheets: { ...workbook.Sheets }
+        };
+
+        const ws = newWorkbook.Sheets[activeSheetName];
+        if (!ws) {
+            toast({
+              variant: "destructive",
+              title: "Sheet Error",
+              description: `Could not find sheet "${activeSheetName}" in the workbook.`
+            });
+            return;
+        }
+        
+        // Find the first empty column in the header row to add "Checked-In At"
+        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+        const headerRow = range.s.r;
+        let checkInColIndex = range.e.c + 1; // Start checking from the column after the last one
+
+        // Add the "Checked-In At" header
+        const headerCellAddress = XLSX.utils.encode_cell({ c: checkInColIndex, r: headerRow });
+        XLSX.utils.sheet_add_aoa(ws, [["Checked-In At"]], { origin: headerCellAddress });
+
+        // Get original data from sheet to match rows
+        const originalData = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
+
+        // Iterate through checked-in rows and update the sheet
+        rows.forEach((row, rowIndex) => {
+            if (row.checkedInTime) {
+                // +1 to account for the header row in Excel sheet
+                const excelRowIndex = rowIndex + 1; 
+                const cellAddress = XLSX.utils.encode_cell({ c: checkInColIndex, r: excelRowIndex });
+                const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
+                XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
+            }
+        });
+        
+        // Update the sheet's range to include the new column
+        const newRange = XLSX.utils.decode_range(ws['!ref']!);
+        if (newRange.e.c < checkInColIndex) {
+            newRange.e.c = checkInColIndex;
+        }
+        ws['!ref'] = XLSX.utils.encode_range(newRange);
+        
         const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
         const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
 
