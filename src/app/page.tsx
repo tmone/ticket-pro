@@ -77,10 +77,10 @@ export default function DashboardPage() {
   });
 
   const stopScan = React.useCallback(() => {
-    setIsScanning(false);
     if (animationFrameIdRef.current) {
         cancelAnimationFrame(animationFrameIdRef.current);
     }
+    setIsScanning(false);
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach((track) => track.stop());
@@ -88,6 +88,130 @@ export default function DashboardPage() {
     }
   }, []);
   
+  const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
+    const { uniqueCode } = data;
+    if (!uniqueCode) return;
+    
+    if (scanSourceRef.current === 'camera') {
+      stopScan();
+    }
+    
+    if (isContinuous && scanSourceRef.current === 'camera' && uniqueCode === lastCheckedInCode) {
+      checkInForm.reset();
+      // Directly call restart without going through the alert dialog flow for silent skips
+      stopScan();
+      setTimeout(() => startScan(), 100);
+      return; 
+    }
+    
+    let codeToSearch = uniqueCode.trim();
+    try {
+        const url = new URL(codeToSearch);
+        const params = url.searchParams;
+        if (params.get("code")) {
+            codeToSearch = params.get("code")!.trim();
+        } else if (params.get("id")) {
+             codeToSearch = params.get("id")!.trim();
+        } else {
+            const firstParam = params.values().next().value;
+            if (firstParam) {
+                codeToSearch = firstParam.trim();
+            }
+        }
+    } catch(e) { /* Not a valid URL, use codeToSearch as is */ }
+
+    let foundRowIndex = -1;
+    
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        for (const header of headers) {
+            const cellValue = row[header];
+            if (cellValue === undefined || cellValue === null) continue;
+
+            let cellCode = String(cellValue).trim();
+            try {
+                const url = new URL(cellCode);
+                const params = url.searchParams;
+                if (params.get("code")) {
+                    cellCode = params.get("code")!.trim();
+                } else if (params.get("id")) {
+                    cellCode = params.get("id")!.trim();
+                } else {
+                   const firstParam = params.values().next().value;
+                   if (firstParam) {
+                       cellCode = firstParam.trim();
+                   }
+                }
+            } catch (e) { /* not a url */ }
+
+            if (codeToSearch.toLowerCase() === cellCode.toLowerCase()) {
+                foundRowIndex = i;
+                break;
+            }
+        }
+        if (foundRowIndex !== -1) {
+            break;
+        }
+    }
+
+
+    if (foundRowIndex !== -1) {
+      const foundRowData = rows[foundRowIndex];
+      if (foundRowData.checkedInTime) {
+        const timeSinceCheckIn = new Date().getTime() - new Date(foundRowData.checkedInTime).getTime();
+        if (isContinuous && scanSourceRef.current === 'camera' && timeSinceCheckIn < 60000) {
+            checkInForm.reset();
+            stopScan();
+            setTimeout(() => startScan(), 100);
+            return;
+        }
+        setScannedRow(foundRowData);
+        setDialogState('duplicate');
+        setIsAlertOpen(true);
+      } else {
+        const updatedRow = { ...foundRowData, checkedInTime: new Date() };
+        const updatedRows = [...rows];
+        updatedRows[foundRowIndex] = updatedRow;
+        setRows(updatedRows);
+        setScannedRow(updatedRow);
+        setDialogState('success');
+        setLastCheckedInCode(uniqueCode); 
+        setIsAlertOpen(true);
+      }
+    } else {
+      setScannedRow(undefined);
+      setDialogState('not_found');
+      setIsAlertOpen(true);
+    }
+    
+  // We need to disable the exhaustive-deps rule here because adding startScan would create a dependency cycle.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, headers, stopScan, lastCheckedInCode, checkInForm, isContinuous]);
+  
+  const tick = React.useCallback(() => {
+    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+        if (ctx) {
+            canvas.height = video.videoHeight;
+            canvas.width = video.videoWidth;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsqr(imageData.data, imageData.width, imageData.height);
+
+            if (code && code.data) {
+                scanSourceRef.current = 'camera';
+                // Stop the loop, handleCheckIn will take over
+                handleCheckIn({ uniqueCode: code.data });
+                return; 
+            }
+        }
+    }
+    animationFrameIdRef.current = requestAnimationFrame(tick);
+  }, [handleCheckIn]);
+
   const startScan = React.useCallback(async () => {
     setScanError(null);
     if (isScanning) return;
@@ -97,13 +221,14 @@ export default function DashboardPage() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
         setIsScanning(true);
+        animationFrameIdRef.current = requestAnimationFrame(tick);
       }
     } catch (err) {
       console.error("Camera access error:", err);
       setScanError("Camera access denied. Please enable it in your browser settings.");
       setIsScanning(false);
     }
-  }, [isScanning]);
+  }, [isScanning, tick]);
 
   const restartContinuousScan = React.useCallback(() => {
       stopScan();
@@ -240,155 +365,6 @@ export default function DashboardPage() {
         processSheetData(sheetName);
     }
   };
-
-  const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
-    const { uniqueCode } = data;
-    if (!uniqueCode) return;
-    
-    // Stop the camera scanning process since we have a code to process
-    if (scanSourceRef.current === 'camera') {
-      stopScan();
-    }
-    
-    // This is a duplicate scan of the last successful one, ignore it.
-    if (uniqueCode === lastCheckedInCode) {
-      checkInForm.reset();
-      if (isContinuous && scanSourceRef.current === 'camera') {
-         restartContinuousScan();
-      }
-      return; 
-    }
-    
-    let codeToSearch = uniqueCode.trim();
-    try {
-        const url = new URL(codeToSearch);
-        const params = url.searchParams;
-        if (params.get("code")) {
-            codeToSearch = params.get("code")!.trim();
-        } else if (params.get("id")) {
-             codeToSearch = params.get("id")!.trim();
-        } else {
-            const firstParam = params.values().next().value;
-            if (firstParam) {
-                codeToSearch = firstParam.trim();
-            }
-        }
-    } catch(e) { /* Not a valid URL, use codeToSearch as is */ }
-
-    let foundRowIndex = -1;
-    let foundRowData: Record<string, any> | null = null;
-    
-    for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        for (const header of headers) {
-            const cellValue = row[header];
-            if (cellValue === undefined || cellValue === null) continue;
-
-            let cellCode = String(cellValue).trim();
-            try {
-                const url = new URL(cellCode);
-                const params = url.searchParams;
-                if (params.get("code")) {
-                    cellCode = params.get("code")!.trim();
-                } else if (params.get("id")) {
-                    cellCode = params.get("id")!.trim();
-                } else {
-                   const firstParam = params.values().next().value;
-                   if (firstParam) {
-                       cellCode = firstParam.trim();
-                   }
-                }
-            } catch (e) { /* not a url */ }
-
-            if (codeToSearch.toLowerCase() === cellCode.toLowerCase()) {
-                foundRowIndex = i;
-                break;
-            }
-        }
-        if (foundRowIndex !== -1) {
-            foundRowData = rows[foundRowIndex];
-            break;
-        }
-    }
-
-
-    if (foundRowIndex !== -1 && foundRowData) {
-      if (foundRowData.checkedInTime) {
-        const timeSinceCheckIn = new Date().getTime() - new Date(foundRowData.checkedInTime).getTime();
-        if (timeSinceCheckIn < 60000) {
-            checkInForm.reset();
-            if (isContinuous && scanSourceRef.current === 'camera') {
-              restartContinuousScan();
-            }
-            return;
-        }
-        setScannedRow(foundRowData);
-        setDialogState('duplicate');
-        setIsAlertOpen(true);
-      } else {
-        const updatedRow = { ...foundRowData, checkedInTime: new Date() };
-        const updatedRows = [...rows];
-        updatedRows[foundRowIndex] = updatedRow;
-        setRows(updatedRows);
-        setScannedRow(updatedRow);
-        setDialogState('success');
-        setLastCheckedInCode(uniqueCode); 
-        setIsAlertOpen(true);
-      }
-    } else {
-      setScannedRow(undefined);
-      setDialogState('not_found');
-      setIsAlertOpen(true);
-    }
-    
-  }, [rows, headers, stopScan, lastCheckedInCode, checkInForm, isContinuous, restartContinuousScan]);
-
-
-  const tick = React.useCallback(() => {
-    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-
-        if (ctx) {
-            canvas.height = video.videoHeight;
-            canvas.width = video.videoWidth;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsqr(imageData.data, imageData.width, imageData.height);
-
-            if (code && code.data) {
-                scanSourceRef.current = 'camera';
-                checkInForm.setValue("uniqueCode", code.data, { shouldValidate: true });
-                setTimeout(() => {
-                    checkInForm.handleSubmit(handleCheckIn)();
-                }, 0);
-            } else {
-                animationFrameIdRef.current = requestAnimationFrame(tick);
-            }
-        } else {
-            animationFrameIdRef.current = requestAnimationFrame(tick);
-        }
-    } else {
-        animationFrameIdRef.current = requestAnimationFrame(tick);
-    }
-  }, [checkInForm, handleCheckIn]);
-
-
-  React.useEffect(() => {
-    if (isScanning) {
-      animationFrameIdRef.current = requestAnimationFrame(tick);
-    } else {
-        if (animationFrameIdRef.current) {
-            cancelAnimationFrame(animationFrameIdRef.current);
-        }
-    }
-    return () => {
-        if (animationFrameIdRef.current) {
-          cancelAnimationFrame(animationFrameIdRef.current);
-        }
-    };
-  }, [isScanning, tick]);
 
   const handleScanButtonClick = () => {
     if (!isScanning) {
@@ -719,5 +695,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
