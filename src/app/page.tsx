@@ -389,7 +389,7 @@ export default function DashboardPage() {
 
     try {
         // IMPORTANT: Work on the original workbook object to preserve styles.
-        // Direct mutation is safe here as we are preparing for a download, not re-rendering.
+        // Direct mutation is safe here as we are preparing for a download, not re-rendering state.
         const ws = workbook.Sheets[activeSheetName];
         if (!ws) {
             toast({
@@ -733,3 +733,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
