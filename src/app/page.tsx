@@ -63,6 +63,7 @@ export default function DashboardPage() {
   const [isScanning, setIsScanning] = React.useState(false);
   const [scanError, setScanError] = React.useState<string | null>(null);
   const [isContinuous, setIsContinuous] = React.useState(false);
+  const [lastCheckedInCode, setLastCheckedInCode] = React.useState<string | null>(null);
 
   const [workbook, setWorkbook] = React.useState<WorkBook | null>(null);
   const [sheetNames, setSheetNames] = React.useState<string[]>([]);
@@ -235,6 +236,10 @@ export default function DashboardPage() {
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
     if (!uniqueCode) return;
+
+    if (uniqueCode === lastCheckedInCode) {
+        return; // Skip if it's the same as the last successful scan
+    }
     
     const inputCode = uniqueCode.trim().toLowerCase();
 
@@ -247,7 +252,7 @@ export default function DashboardPage() {
             
             const lowerCaseCellValue = String(cellValue).trim().toLowerCase();
 
-            // 1. Direct match
+            // 1. Direct match (case-insensitive)
             if (lowerCaseCellValue === inputCode) {
                 return true;
             }
@@ -255,27 +260,25 @@ export default function DashboardPage() {
             // 2. Check if cell value is a URL and inputCode is the query param
             try {
                 const url = new URL(lowerCaseCellValue);
-                const params = url.searchParams;
-                for (const paramValue of params.values()) {
+                for (const paramValue of url.searchParams.values()) {
                     if (paramValue.trim().toLowerCase() === inputCode) {
                         return true;
                     }
                 }
             } catch (e) {
-                // cellValue is not a URL, ignore error
+                // Not a URL, ignore
             }
 
-            // 3. Check if inputCode is a URL and cellValue is the query param
+            // 3. Check if inputCode is a URL and cellValue is one of its query params
             try {
                 const url = new URL(inputCode);
-                const params = url.searchParams;
-                for (const paramValue of params.values()) {
+                 for (const paramValue of url.searchParams.values()) {
                     if (paramValue.trim().toLowerCase() === lowerCaseCellValue) {
                         return true;
                     }
                 }
             } catch (e) {
-                // inputCode is not a URL, ignore error
+                // Not a URL, ignore
             }
 
             return false;
@@ -286,6 +289,11 @@ export default function DashboardPage() {
       const foundRow = rows[rowIndex];
       
       if (foundRow.checkedInTime) {
+        const timeSinceCheckIn = new Date().getTime() - new Date(foundRow.checkedInTime).getTime();
+        // If checked in within the last 60 seconds, just ignore it.
+        if (timeSinceCheckIn < 60000) {
+            return;
+        }
         setScannedRow(foundRow);
         setDialogState('duplicate');
       } else {
@@ -295,6 +303,7 @@ export default function DashboardPage() {
         setRows(updatedRows);
         setScannedRow(updatedRow);
         setDialogState('success');
+        setLastCheckedInCode(uniqueCode);
       }
     } else {
       setScannedRow(undefined);
@@ -303,7 +312,7 @@ export default function DashboardPage() {
 
     setIsAlertOpen(true);
     if(isScanning) stopScan();
-  }, [rows, headers, isScanning, stopScan]);
+  }, [rows, headers, isScanning, stopScan, lastCheckedInCode]);
 
   const tick = React.useCallback(() => {
     if (isScanning && videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
@@ -391,6 +400,7 @@ export default function DashboardPage() {
   const handleAlertClose = React.useCallback(() => {
     setIsAlertOpen(false);
     checkInForm.reset();
+    setLastCheckedInCode(null); // Reset for the next scan
     if (isContinuous && isScanning === false) {
       setTimeout(() => startScan(), 100);
     }
