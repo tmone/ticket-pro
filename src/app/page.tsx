@@ -52,6 +52,7 @@ export default function DashboardPage() {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
   const animationFrameIdRef = React.useRef<number>();
 
   const [headers, setHeaders] = React.useState<string[]>([]);
@@ -258,7 +259,7 @@ export default function DashboardPage() {
                 return true;
             }
 
-            // 2. Check if cell value is a URL and inputCode is the query param
+            // 2. Check if cell value is a URL and inputCode is one of its query params
             try {
                 const url = new URL(lowerCaseCellValue);
                 for (const paramValue of url.searchParams.values()) {
@@ -402,6 +403,7 @@ export default function DashboardPage() {
   const handleAlertClose = React.useCallback(() => {
     setIsAlertOpen(false);
     checkInForm.reset();
+    inputRef.current?.focus(); // Keep focus on input
     setLastCheckedInCode(null); // Reset for the next scan
     if (isContinuous && isScanning === false) {
       setTimeout(() => startScan(), 100);
@@ -527,7 +529,12 @@ export default function DashboardPage() {
                                 <FormItem>
                                     <FormLabel>Unique Code</FormLabel>
                                     <FormControl>
-                                        <Input placeholder="Paste or type code here..." {...field} disabled={rows.length === 0} />
+                                        <Input 
+                                            ref={(e) => {
+                                                field.ref(e);
+                                                (inputRef as React.MutableRefObject<HTMLInputElement | null>).current = e;
+                                            }}
+                                            placeholder="Paste or type code here..." {...field} disabled={rows.length === 0} />
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
@@ -660,3 +667,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
