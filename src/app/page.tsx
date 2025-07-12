@@ -54,6 +54,7 @@ export default function DashboardPage() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const animationFrameIdRef = React.useRef<number>();
+  const scanSourceRef = React.useRef<'camera' | 'form' | null>(null);
 
   const [headers, setHeaders] = React.useState<string[]>([]);
   const [rows, setRows] = React.useState<Record<string, any>[]>([]);
@@ -332,6 +333,7 @@ export default function DashboardPage() {
 
             if (code && code.data) {
                 stopScan();
+                scanSourceRef.current = 'camera';
                 checkInForm.setValue("uniqueCode", code.data, { shouldValidate: true });
                 setTimeout(() => {
                     checkInForm.handleSubmit(handleCheckIn)();
@@ -403,11 +405,18 @@ export default function DashboardPage() {
   const handleAlertClose = React.useCallback(() => {
     setIsAlertOpen(false);
     checkInForm.reset();
+    
     if (isContinuous) {
-        inputRef.current?.focus(); // Keep focus on input only in continuous mode
-        setLastCheckedInCode(null); // Reset for the next scan
+      if (scanSourceRef.current === 'camera') {
+          setTimeout(() => startScan(), 100);
+      } else {
+          inputRef.current?.focus();
+      }
     }
-  }, [isContinuous, checkInForm]);
+    
+    setLastCheckedInCode(null);
+    scanSourceRef.current = null;
+  }, [isContinuous, checkInForm, startScan]);
 
   React.useEffect(() => {
       if (isContinuous && dialogState === 'success' && isAlertOpen) {
@@ -520,7 +529,14 @@ export default function DashboardPage() {
                     {isScanning ? 'Stop Camera' : 'Scan QR Code'}
                 </Button>
                 <Form {...checkInForm}>
-                    <form onSubmit={checkInForm.handleSubmit(handleCheckIn)} className="space-y-4">
+                    <form 
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            scanSourceRef.current = 'form';
+                            checkInForm.handleSubmit(handleCheckIn)();
+                        }} 
+                        className="space-y-4"
+                    >
                         <FormField
                             control={checkInForm.control}
                             name="uniqueCode"
@@ -598,7 +614,12 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      <AlertDialog open={isAlertOpen} onOpenChange={setIsAlertOpen}>
+      <AlertDialog open={isAlertOpen} onOpenChange={(open) => {
+        if (!open) {
+          handleAlertClose();
+        }
+        setIsAlertOpen(open);
+      }}>
         <AlertDialogContent>
           {dialogState === 'success' && scannedRow && (
             <>
@@ -666,3 +687,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
