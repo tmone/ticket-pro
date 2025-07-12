@@ -388,21 +388,9 @@ export default function DashboardPage() {
     }
 
     try {
-        // Create a deep copy of the workbook to avoid direct state mutation.
-        // This is a safer way to handle complex objects in React state.
-        const newWorkbook: WorkBook = {
-            SheetNames: [],
-            Sheets: {}
-        };
-
-        for (const name of workbook.SheetNames) {
-            newWorkbook.SheetNames.push(name);
-            newWorkbook.Sheets[name] = {...(workbook.Sheets[name])};
-            // This shallow copy of the sheet is the key. 
-            // We need to avoid deep cloning the cells themselves as it loses properties.
-        }
-
-        const ws = newWorkbook.Sheets[activeSheetName];
+        // IMPORTANT: Work on the original workbook object to preserve styles.
+        // Direct mutation is safe here as we are preparing for a download, not re-rendering.
+        const ws = workbook.Sheets[activeSheetName];
         if (!ws) {
             toast({
               variant: "destructive",
@@ -421,21 +409,24 @@ export default function DashboardPage() {
         const headerAddress = `${checkInColName}1`;
         XLSX.utils.sheet_add_aoa(ws, [['Checked-In At']], { origin: headerAddress });
 
-        // Iterate through checked-in rows and update the sheet
+        // Iterate through checked-in rows and update the sheet cell by cell
         rows.forEach(row => {
             if (row.checkedInTime && row.__rowNum__) {
                 const cellAddress = `${checkInColName}${row.__rowNum__}`;
                 const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
+                // This edits the cell directly, preserving all other cells and styles
                 XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
             }
         });
         
         // Update the sheet's range to include the new column
-        const newRange = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
-        newRange.e.c = Math.max(newRange.e.c, checkInColIndex);
-        ws['!ref'] = XLSX.utils.encode_range(newRange);
+        if (ws['!ref']) {
+            const newRange = XLSX.utils.decode_range(ws['!ref']);
+            newRange.e.c = Math.max(newRange.e.c, checkInColIndex);
+            ws['!ref'] = XLSX.utils.encode_range(newRange);
+        }
         
-        const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
+        const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
         const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
 
         const link = document.createElement('a');
