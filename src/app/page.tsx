@@ -236,33 +236,51 @@ export default function DashboardPage() {
     const { uniqueCode } = data;
     if (!uniqueCode) return;
     
-    let searchCode = uniqueCode.trim();
+    const inputCode = uniqueCode.trim().toLowerCase();
 
-    try {
-      const url = new URL(searchCode);
-      const params = url.searchParams;
-      // Get the value of the first query parameter
-      const firstParamValue = params.values().next().value;
-      if (firstParamValue) {
-        searchCode = firstParamValue.trim();
-      }
-    } catch (e) {
-      // Not a valid URL, search with the code as-is.
-    }
-    
-    const lowerCaseSearchCode = searchCode.toLowerCase();
-
-    const rowIndex = rows.findIndex(row =>
-        // Iterate only over the visible headers
-        headers.some(header => {
+    const rowIndex = rows.findIndex(row => {
+        return headers.some(header => {
             const cellValue = row[header];
             if (cellValue === undefined || cellValue === null) {
                 return false;
             }
-            // Perform an exact, case-insensitive match
-            return String(cellValue).trim().toLowerCase() === lowerCaseSearchCode;
-        })
-    );
+            
+            const lowerCaseCellValue = String(cellValue).trim().toLowerCase();
+
+            // 1. Direct match
+            if (lowerCaseCellValue === inputCode) {
+                return true;
+            }
+
+            // 2. Check if cell value is a URL and inputCode is the query param
+            try {
+                const url = new URL(lowerCaseCellValue);
+                const params = url.searchParams;
+                for (const paramValue of params.values()) {
+                    if (paramValue.trim().toLowerCase() === inputCode) {
+                        return true;
+                    }
+                }
+            } catch (e) {
+                // cellValue is not a URL, ignore error
+            }
+
+            // 3. Check if inputCode is a URL and cellValue is the query param
+            try {
+                const url = new URL(inputCode);
+                const params = url.searchParams;
+                for (const paramValue of params.values()) {
+                    if (paramValue.trim().toLowerCase() === lowerCaseCellValue) {
+                        return true;
+                    }
+                }
+            } catch (e) {
+                // inputCode is not a URL, ignore error
+            }
+
+            return false;
+        });
+    });
 
     if (rowIndex !== -1) {
       const foundRow = rows[rowIndex];
