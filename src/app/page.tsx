@@ -25,11 +25,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Alert, AlertTitle, AlertDescription as AlertDialogDescriptionUI } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Alert, AlertTitle, AlertDescription as AlertDescriptionUI } from "@/components/ui/alert";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   TicketCheck,
   Upload,
@@ -71,7 +77,7 @@ export default function DashboardPage() {
 
   const [workbook, setWorkbook] = React.useState<WorkBook | null>(null);
   const [sheetNames, setSheetNames] = React.useState<string[]>([]);
-  const [selectedSheet, setSelectedSheet] = React.useState<string>("");
+  const [isSheetSelectorOpen, setIsSheetSelectorOpen] = React.useState(false);
   const [highlightedRowIndex, setHighlightedRowIndex] = React.useState<number | null>(null);
   
   const checkInForm = useForm<z.infer<typeof checkInSchema>>({
@@ -295,7 +301,6 @@ export default function DashboardPage() {
     setHeaders(extractedHeaders);
     setRows(initialRows);
     setScannedRow(null);
-    setSelectedSheet(sheetName);
 
     toast({
       title: "Success!",
@@ -312,22 +317,25 @@ export default function DashboardPage() {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: "array" });
+        const names = wb.SheetNames;
+        
         setWorkbook(wb);
-        const sheetNames = wb.SheetNames;
-        setSheetNames(sheetNames);
-
+        setSheetNames(names);
+        
+        // Reset current data
         setHeaders([]);
         setRows([]);
-        
-        if (sheetNames.length > 0) {
-            processSheetData(wb, sheetNames[0]);
-        } else {
+
+        if (names.length === 0) {
             toast({
                 variant: "destructive",
                 title: "No Sheets Found",
                 description: "The uploaded Excel file does not contain any sheets.",
             });
-            setSelectedSheet("");
+        } else if (names.length === 1) {
+            processSheetData(wb, names[0]);
+        } else {
+            setIsSheetSelectorOpen(true); // Open modal to select a sheet
         }
         
       } catch (error) {
@@ -354,6 +362,7 @@ export default function DashboardPage() {
     if (sheetName && workbook) {
         processSheetData(workbook, sheetName);
     }
+    setIsSheetSelectorOpen(false);
   };
 
   const handleScanButtonClick = () => {
@@ -423,10 +432,10 @@ export default function DashboardPage() {
               <CardHeader>
                 <CardTitle>Upload Attendee List</CardTitle>
                 <CardDescription>
-                    Select an Excel file. If it has multiple sheets, you can choose which one to use.
+                    Select an Excel file. If it has multiple sheets, you will be prompted to choose one.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent>
                 <input
                     type="file"
                     ref={fileInputRef}
@@ -438,22 +447,6 @@ export default function DashboardPage() {
                     <Upload className="mr-2 h-4 w-4" />
                     Upload Excel File
                 </Button>
-                {sheetNames.length > 1 && (
-                    <div className="space-y-2">
-                        <Label htmlFor="sheet-select">Select a sheet</Label>
-                        <Select onValueChange={handleSheetSelect} value={selectedSheet}>
-                            <SelectTrigger id="sheet-select">
-                                <FileSpreadsheet className="mr-2 h-4 w-4" />
-                                <SelectValue placeholder="Select a sheet" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {sheetNames.map(name => (
-                                    <SelectItem key={name} value={name}>{name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                )}
               </CardContent>
             </Card>
             <Card>
@@ -492,7 +485,7 @@ export default function DashboardPage() {
                     <Alert variant="destructive" className="mb-4">
                         <AlertTriangle className="h-4 w-4" />
                         <AlertTitle>Camera Error</AlertTitle>
-                        <AlertDialogDescriptionUI>{scanError}</AlertDialogDescriptionUI>
+                        <AlertDescriptionUI>{scanError}</AlertDescriptionUI>
                     </Alert>
                 )}
                 <div className="flex items-center space-x-2 mb-4">
@@ -600,6 +593,29 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
+
+      <Dialog open={isSheetSelectorOpen} onOpenChange={setIsSheetSelectorOpen}>
+        <DialogContent>
+            <DialogHeader>
+            <DialogTitle>Select a Sheet</DialogTitle>
+            <DialogDescription>
+                Your Excel file contains multiple sheets. Please select the one you'd like to import.
+            </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col space-y-2">
+            {sheetNames.map(name => (
+                <Button
+                key={name}
+                variant="outline"
+                onClick={() => handleSheetSelect(name)}
+                >
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                {name}
+                </Button>
+            ))}
+            </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={isAlertOpen} onOpenChange={(open) => {
         if (!open) {
