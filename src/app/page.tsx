@@ -57,7 +57,6 @@ export default function DashboardPage() {
   const animationFrameIdRef = React.useRef<number>();
   const scanSourceRef = React.useRef<'camera' | 'form' | null>(null);
   const rowRefs = React.useRef<(HTMLTableRowElement | null)[]>([]);
-  const observerRef = React.useRef<IntersectionObserver | null>(null);
 
   const [headers, setHeaders] = React.useState<string[]>([]);
   const [rows, setRows] = React.useState<Record<string, any>[]>([]);
@@ -74,7 +73,6 @@ export default function DashboardPage() {
   const [sheetNames, setSheetNames] = React.useState<string[]>([]);
   const [selectedSheet, setSelectedSheet] = React.useState<string>("");
   const [highlightedRowIndex, setHighlightedRowIndex] = React.useState<number | null>(null);
-  const [revealedRows, setRevealedRows] = React.useState<Set<number>>(new Set());
   
   const checkInForm = useForm<z.infer<typeof checkInSchema>>({
     resolver: zodResolver(checkInSchema),
@@ -164,7 +162,6 @@ export default function DashboardPage() {
     
     setHighlightedRowIndex(foundRowIndex !== -1 ? foundRowIndex : null);
     if(foundRowIndex !== -1) {
-        setRevealedRows(prev => new Set(prev).add(foundRowIndex));
         rowRefs.current[foundRowIndex]?.scrollIntoView({
             behavior: 'smooth',
             block: 'center'
@@ -221,7 +218,7 @@ export default function DashboardPage() {
     if (isScanning) {
         animationFrameIdRef.current = requestAnimationFrame(tick);
     }
-  }, [handleCheckIn, isScanning, stopScan]);
+  }, [handleCheckIn, isScanning]);
   
   const startScan = React.useCallback(async () => {
     setScanError(null);
@@ -297,7 +294,6 @@ export default function DashboardPage() {
     setScannedRow(null);
     setSelectedSheet(sheetName);
     setHighlightedRowIndex(null);
-    setRevealedRows(new Set());
     rowRefs.current = [];
 
 
@@ -450,39 +446,6 @@ export default function DashboardPage() {
           return () => clearTimeout(timer);
       }
   }, [isAlertOpen, dialogState, isContinuous, handleAlertClose]);
-
-  React.useEffect(() => {
-    if (observerRef.current) observerRef.current.disconnect();
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const rowIndex = parseInt(entry.target.getAttribute('data-row-index')!, 10);
-            setRevealedRows(prev => {
-              if (prev.has(rowIndex)) return prev;
-              const newSet = new Set(prev);
-              newSet.add(rowIndex);
-              return newSet;
-            });
-            observerRef.current?.unobserve(entry.target);
-          }
-        });
-      },
-      { rootMargin: '0px', threshold: 0.1 }
-    );
-    
-    const currentObserver = observerRef.current;
-    rowRefs.current.forEach(row => {
-      if (row) currentObserver.observe(row);
-    });
-
-    return () => {
-      if (currentObserver) {
-        currentObserver.disconnect();
-      }
-    };
-  }, [rows]); // Re-run when rows change
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
@@ -648,14 +611,13 @@ export default function DashboardPage() {
                                       ref={(el) => {
                                           if (el) rowRefs.current[rowIndex] = el;
                                       }}
-                                      data-row-index={rowIndex}
                                       className={cn(
                                         highlightedRowIndex === rowIndex && 'bg-primary/10'
                                       )}
                                     >
                                         {headers.map(header => (
                                             <TableCell key={header}>
-                                                {revealedRows.has(rowIndex) || highlightedRowIndex === rowIndex ? String(row[header] ?? '') : '••••••'}
+                                                {String(row[header] ?? '')}
                                             </TableCell>
                                         ))}
                                         <TableCell>
@@ -703,8 +665,8 @@ export default function DashboardPage() {
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <div className="text-sm space-y-1 max-h-60 overflow-auto">
-                {Object.entries(scannedRow).filter(([key]) => key !== 'checkedInTime').map(([key, value]) => (
-                    <p key={key}><strong>{key}:</strong> {String(value)}</p>
+                {headers.map((header) => (
+                    <p key={header}><strong>{header}:</strong> {String(scannedRow[header] ?? '')}</p>
                 ))}
                 <p>
                   <strong>Checked-in:</strong>{" "}
@@ -726,8 +688,8 @@ export default function DashboardPage() {
               </AlertDialogHeader>
               <div className="text-sm space-y-2 max-h-60 overflow-auto rounded-md border bg-muted p-4">
                 <p className="font-bold text-lg mb-2">Original Check-in Details:</p>
-                {Object.entries(scannedRow).filter(([key]) => key !== 'checkedInTime').map(([key, value]) => (
-                    <p key={key}><strong>{key}:</strong> {String(value)}</p>
+                {headers.map((header) => (
+                    <p key={header}><strong>{header}:</strong> {String(scannedRow[header] ?? '')}</p>
                 ))}
                 <p className="mt-2">
                   <strong>Initial Check-in Time:</strong>{" "}
