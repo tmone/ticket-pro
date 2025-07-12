@@ -98,30 +98,20 @@ export default function DashboardPage() {
     const { uniqueCode } = data;
     if (!uniqueCode) return;
     
-    // If continuous scanning from camera and the code is a duplicate of the last one, ignore it.
-    if (isContinuous && scanSourceRef.current === 'camera' && uniqueCode === lastCheckedInCode) {
-        if (isContinuous && scanSourceRef.current === 'camera') {
-            stopScan();
-            setTimeout(() => startScan(), 100);
-        }
-        return; 
+    if (scanSourceRef.current === 'camera' && isScanning) {
+      stopScan();
     }
     
-    stopScan(); // Stop scanning as soon as we have a code to process.
-
     let codeToSearch = uniqueCode.trim();
     try {
         const url = new URL(codeToSearch);
         const params = url.searchParams;
-        if (params.get("code")) {
-            codeToSearch = params.get("code")!.trim();
-        } else if (params.get("id")) {
-             codeToSearch = params.get("id")!.trim();
+        const codeParam = params.get("code") || params.get("id");
+        if (codeParam) {
+            codeToSearch = codeParam.trim();
         } else {
             const firstParam = params.values().next().value;
-            if (firstParam) {
-                codeToSearch = firstParam.trim();
-            }
+            if (firstParam) codeToSearch = firstParam.trim();
         }
     } catch(e) { /* Not a valid URL, use codeToSearch as is */ }
 
@@ -137,15 +127,12 @@ export default function DashboardPage() {
             try {
                 const url = new URL(cellCode);
                 const params = url.searchParams;
-                if (params.get("code")) {
-                    cellCode = params.get("code")!.trim();
-                } else if (params.get("id")) {
-                    cellCode = params.get("id")!.trim();
+                const codeParam = params.get("code") || params.get("id");
+                if (codeParam) {
+                    cellCode = codeParam.trim();
                 } else {
                    const firstParam = params.values().next().value;
-                   if (firstParam) {
-                       cellCode = firstParam.trim();
-                   }
+                   if (firstParam) cellCode = firstParam.trim();
                 }
             } catch (e) { /* not a url */ }
 
@@ -154,17 +141,18 @@ export default function DashboardPage() {
                 break;
             }
         }
-        if (foundRowIndex !== -1) {
-            break;
-        }
+        if (foundRowIndex !== -1) break;
     }
     
     setHighlightedRowIndex(foundRowIndex !== -1 ? foundRowIndex : null);
     if(foundRowIndex !== -1) {
-        rowRefs.current[foundRowIndex]?.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center'
-        })
+        const rowElement = rowRefs.current[foundRowIndex];
+        if (rowElement) {
+            rowElement.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
+            });
+        }
     }
 
     if (foundRowIndex !== -1) {
@@ -188,8 +176,9 @@ export default function DashboardPage() {
       setDialogState('not_found');
       setIsAlertOpen(true);
     }
-  }, [rows, headers, isContinuous, lastCheckedInCode, stopScan]);
-  
+  }, [rows, headers, isScanning, stopScan]);
+
+
   const tick = React.useCallback(() => {
     if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
         const video = videoRef.current;
@@ -204,21 +193,17 @@ export default function DashboardPage() {
             const code = jsqr(imageData.data, imageData.width, imageData.height);
 
             if (code && code.data) {
-                if (animationFrameIdRef.current) {
-                  cancelAnimationFrame(animationFrameIdRef.current);
-                  animationFrameIdRef.current = undefined;
-                }
-                scanSourceRef.current = 'camera';
-                handleCheckIn({ uniqueCode: code.data });
-                return; 
+              scanSourceRef.current = 'camera';
+              handleCheckIn({ uniqueCode: code.data });
+              return;
             }
         }
     }
-    if (isScanning) {
-        animationFrameIdRef.current = requestAnimationFrame(tick);
+    if (animationFrameIdRef.current) {
+      animationFrameIdRef.current = requestAnimationFrame(tick);
     }
-  }, [handleCheckIn, isScanning]);
-  
+  }, [handleCheckIn]);
+
   const startScan = React.useCallback(async () => {
     setScanError(null);
     if (isScanning || animationFrameIdRef.current) return;
@@ -226,7 +211,7 @@ export default function DashboardPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => videoRef.current!.onloadedmetadata = resolve);
         await videoRef.current.play();
         setIsScanning(true);
         animationFrameIdRef.current = requestAnimationFrame(tick);
@@ -238,10 +223,21 @@ export default function DashboardPage() {
     }
   }, [isScanning, tick]);
 
-  const restartContinuousScan = React.useCallback(() => {
-      stopScan();
-      setTimeout(() => startScan(), 100);
-  }, [startScan, stopScan]);
+  const handleAlertClose = React.useCallback(() => {
+    setIsAlertOpen(false);
+    checkInForm.reset();
+    
+    if (isContinuous && scanSourceRef.current === 'camera') {
+      if (uniqueCode === lastCheckedInCode && dialogState === 'duplicate') {
+        setTimeout(() => startScan(), 100);
+      } else {
+        setTimeout(() => startScan(), 100); 
+      }
+    } else if (isContinuous && scanSourceRef.current === 'form') {
+      inputRef.current?.focus();
+    }
+    const uniqueCode = checkInForm.getValues("uniqueCode");
+  }, [isContinuous, checkInForm, startScan, lastCheckedInCode, dialogState]);
 
   React.useEffect(() => {
     return () => {
@@ -250,15 +246,6 @@ export default function DashboardPage() {
   }, [stopScan]);
 
   const processSheetData = (wb: WorkBook, sheetName: string) => {
-    if (!wb) {
-        toast({
-            variant: "destructive",
-            title: "Workbook not found",
-            description: "Please upload an Excel file first."
-        });
-        return;
-    }
-
     const worksheet = wb.Sheets[sheetName];
     if (!worksheet) {
         toast({
@@ -282,8 +269,16 @@ export default function DashboardPage() {
       return;
     }
     
-    const firstRow = jsonData[0];
-    const extractedHeaders = Object.keys(firstRow).filter(h => h !== '__rowNum__');
+    // Iterate over all rows to find all possible headers
+    const headerSet = new Set<string>();
+    jsonData.forEach(row => {
+      Object.keys(row).forEach(key => {
+        if (key !== '__rowNum__') {
+          headerSet.add(key);
+        }
+      });
+    });
+    const extractedHeaders = Array.from(headerSet);
     
     const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
 
@@ -294,10 +289,9 @@ export default function DashboardPage() {
     setHighlightedRowIndex(null);
     rowRefs.current = [];
 
-
     toast({
       title: "Success!",
-      description: `Successfully imported ${jsonData.length} rows from sheet: ${sheetName}.`,
+      description: `Successfully imported ${jsonData.length} rows and ${extractedHeaders.length} columns from sheet: ${sheetName}.`,
     });
   };
 
@@ -399,20 +393,6 @@ export default function DashboardPage() {
         description: "The attendee report has been downloaded."
     });
   };
-  
-  const handleAlertClose = React.useCallback(() => {
-    setIsAlertOpen(false);
-    checkInForm.reset();
-    
-    if (isContinuous) {
-      if (scanSourceRef.current === 'camera') {
-        restartContinuousScan();
-      } else if (scanSourceRef.current === 'form') {
-          inputRef.current?.focus();
-      }
-    }
-    
-  }, [isContinuous, checkInForm, restartContinuousScan]);
 
   React.useEffect(() => {
       if (isContinuous && dialogState === 'success' && isAlertOpen) {
