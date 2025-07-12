@@ -58,7 +58,7 @@ export default function DashboardPage() {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const inputRef = React.useRef<HTMLInputElement>(null);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
   const animationFrameIdRef = React.useRef<number>();
   const scanSourceRef = React.useRef<'camera' | 'form' | null>(null);
   const rowRefs = React.useRef<(HTMLTableRowElement | null)[]>([]);
@@ -269,9 +269,12 @@ export default function DashboardPage() {
         return;
     }
 
-    const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet);
+    const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
+      header: 1,
+      defval: '',
+    });
 
-    if (jsonData.length === 0) {
+    if (jsonData.length < 1) {
       toast({
           variant: "destructive",
           title: "No Data",
@@ -281,19 +284,23 @@ export default function DashboardPage() {
       setRows([]);
       return;
     }
-
-    const headerSet = new Set<string>();
-    jsonData.forEach(row => {
-      Object.keys(row).forEach(key => {
-        if (key !== '__rowNum__') {
-          headerSet.add(key);
-        }
+    
+    const headerRow = jsonData[0] as string[];
+    const dataRows = jsonData.slice(1);
+    
+    const extractedHeaders = headerRow.filter(h => h);
+    
+    const processedRows = dataRows.map(rowArray => {
+      const rowObject: Record<string, any> = {};
+      extractedHeaders.forEach((header, index) => {
+        rowObject[header] = rowArray[index];
       });
+      rowObject.checkedInTime = null;
+      return rowObject;
     });
-    const extractedHeaders = Array.from(headerSet);
 
     setHeaders(extractedHeaders);
-    setRows(jsonData.map(row => ({...row, checkedInTime: null})));
+    setRows(processedRows);
     
     setScannedRow(null);
     rowRefs.current = [];
@@ -301,7 +308,7 @@ export default function DashboardPage() {
 
     toast({
       title: "Success!",
-      description: `Successfully imported ${jsonData.length} rows and ${extractedHeaders.length} columns from sheet: ${sheetName}.`,
+      description: `Successfully imported ${processedRows.length} rows and ${extractedHeaders.length} columns from sheet: ${sheetName}.`,
     });
   };
 
@@ -319,9 +326,11 @@ export default function DashboardPage() {
         setWorkbook(wb);
         setSheetNames(names);
         
-        // Reset current data
         setHeaders([]);
         setRows([]);
+        setScannedRow(null);
+        setHighlightedRowIndex(null);
+        rowRefs.current = [];
 
         if (names.length === 0) {
             toast({
