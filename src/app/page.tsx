@@ -394,14 +394,18 @@ export default function DashboardPage() {
         return;
     }
 
-    // Create a safe copy of the workbook to avoid modifying the original state directly
+    // Create a new workbook object to avoid mutating state directly.
     const newWorkbook: WorkBook = {
         SheetNames: [...workbook.SheetNames],
         Sheets: {}
     };
+
+    // Deep copy sheets to preserve them
     for (const sheetName of workbook.SheetNames) {
-        // This creates a shallow copy, which is sufficient here
-        newWorkbook.Sheets[sheetName] = {...workbook.Sheets[sheetName]};
+        // A simple structuredClone would be ideal, but to avoid issues with complex objects from xlsx,
+        // we can re-parse the sheet which is a safe way to clone.
+        const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+        newWorkbook.Sheets[sheetName] = XLSX.utils.json_to_sheet(sheetData);
     }
 
     const dataToExport = rows.map(row => {
@@ -415,26 +419,35 @@ export default function DashboardPage() {
 
     const newWorksheet = XLSX.utils.json_to_sheet(dataToExport);
     
-    // Replace the old sheet with the new one
+    // Replace the old sheet with the new one in the new workbook
     newWorkbook.Sheets[activeSheetName] = newWorksheet;
     
-    const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
+    try {
+        const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
 
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'attendee_report_updated.xlsx');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', 'attendee_report_updated.xlsx');
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
 
-    toast({
-        title: "Export Successful",
-        description: "The updated attendee report has been downloaded."
-    });
+        toast({
+            title: "Export Successful",
+            description: "The updated attendee report has been downloaded."
+        });
+    } catch (error) {
+        console.error("Error exporting Excel file:", error);
+        toast({
+          variant: "destructive",
+          title: "Export Error",
+          description: "Could not export the Excel file.",
+        });
+    }
   };
 
   return (
