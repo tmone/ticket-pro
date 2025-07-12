@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   
   const code = req.nextUrl.searchParams.get('code');
   if (!code) {
-    return NextResponse.json({ error: 'Authorization code not found.' }, { status: 400 });
+    return NextResponse.json({ error: 'Authorization code not found in callback URL.' }, { status: 400 });
   }
 
   try {
@@ -28,7 +28,18 @@ export async function GET(req: NextRequest) {
       OAUTH2_REDIRECT_URI
     );
 
-    const { tokens } = await oauth2Client.getToken(code);
+    let tokens;
+    try {
+      const response = await oauth2Client.getToken(code);
+      tokens = response.tokens;
+    } catch (error: any) {
+        console.error('Error getting token from Google:', error.response?.data || error.message);
+        return NextResponse.json({ 
+            error: 'Failed to exchange authorization code for tokens.',
+            details: error.response?.data || error.message
+        }, { status: 400 });
+    }
+    
     oauth2Client.setCredentials(tokens);
 
     const oauth2 = google.oauth2({
@@ -36,7 +47,17 @@ export async function GET(req: NextRequest) {
       version: 'v2',
     });
 
-    const { data: userInfo } = await oauth2.userinfo.get();
+    let userInfo;
+    try {
+        const { data } = await oauth2.userinfo.get();
+        userInfo = data;
+    } catch(error: any) {
+        console.error('Error fetching user info from Google:', error.response?.data || error.message);
+        return NextResponse.json({ 
+            error: 'Failed to fetch user profile information from Google.',
+            details: error.response?.data || error.message
+        }, { status: 500 });
+    }
 
     // Save tokens and user info in the session
     session.isLoggedIn = true;
@@ -46,12 +67,16 @@ export async function GET(req: NextRequest) {
     session.picture = userInfo.picture || '';
 
     await session.save();
+    console.log('Session saved successfully for user:', userInfo.email);
 
     // Redirect to the dashboard
-    return NextResponse.redirect(new URL('/', req.url));
+    return NextResponse.redirect(new URL('/', req.nextUrl));
 
-  } catch (error) {
-    console.error('Error during Google OAuth callback:', error);
-    return NextResponse.json({ error: 'Authentication failed.' }, { status: 500 });
+  } catch (error: any) {
+    console.error('An unexpected error occurred during Google OAuth callback:', error);
+    return NextResponse.json({ 
+        error: 'An unexpected error occurred during the authentication process.',
+        details: error.message
+    }, { status: 500 });
   }
 }
