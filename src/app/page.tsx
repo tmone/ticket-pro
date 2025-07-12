@@ -245,13 +245,22 @@ export default function DashboardPage() {
         searchCode = potentialCode.trim();
       }
     } catch (e) {
-      // Not a valid URL
+      // Not a valid URL, search with the code as-is.
     }
+    
+    const lowerCaseSearchCode = searchCode.toLowerCase();
 
     const rowIndex = rows.findIndex(row =>
-        headers.some(header => 
-            String(row[header]).trim().toLowerCase() === searchCode.toLowerCase()
-        )
+        headers.some(header => {
+            const cellValue = row[header];
+            if (cellValue === undefined || cellValue === null) {
+                return false;
+            }
+            const lowerCaseCellValue = String(cellValue).trim().toLowerCase();
+            
+            // Match if the cell value equals the search code OR if the cell value contains the search code.
+            return lowerCaseCellValue === lowerCaseSearchCode || lowerCaseCellValue.includes(lowerCaseSearchCode);
+        })
     );
 
     if (rowIndex !== -1) {
