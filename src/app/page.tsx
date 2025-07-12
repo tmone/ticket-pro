@@ -84,12 +84,6 @@ export default function DashboardPage() {
   const [activeSheetName, setActiveSheetName] = React.useState<string | null>(null);
   const [isSheetSelectorOpen, setIsSheetSelectorOpen] = React.useState(false);
   const [highlightedRowIndex, setHighlightedRowIndex] = React.useState<number | null>(null);
-  const [uploadedFileInfo, setUploadedFileInfo] = React.useState<{
-    name: string;
-    size: string;
-    type: string;
-    hasFormatting: boolean;
-  } | null>(null);
   const [isClient, setIsClient] = React.useState(false);
   
   React.useEffect(() => {
@@ -387,12 +381,6 @@ export default function DashboardPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    setUploadedFileInfo({
-      name: file.name,
-      size: (file.size / 1024).toFixed(1) + ' KB',
-      type: file.name.split('.').pop()?.toUpperCase() || 'Unknown',
-      hasFormatting: false, // Will be updated after processing
-    });
 
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -418,11 +406,6 @@ export default function DashboardPage() {
         setHighlightedRowIndex(null);
         rowRefs.current = [];
 
-        // Update file info with formatting detection
-        setUploadedFileInfo(prev => prev ? {
-          ...prev,
-          hasFormatting: result.hasFormatting,
-        } : null);
 
         if (result.sheets.length === 0) {
             toast({
@@ -430,7 +413,6 @@ export default function DashboardPage() {
                 title: "No Sheets Found",
                 description: "The uploaded Excel file does not contain any sheets.",
             });
-            setUploadedFileInfo(null);
             return;
         }
 
@@ -455,7 +437,6 @@ export default function DashboardPage() {
           title: "File Error",
           description: "Could not process the Excel file. Please ensure it's a valid format.",
         });
-        setUploadedFileInfo(null);
       }
     };
     reader.onerror = () => {
@@ -464,7 +445,6 @@ export default function DashboardPage() {
             title: "File Read Error",
             description: "There was an error reading the file."
         });
-        setUploadedFileInfo(null);
     }
     reader.readAsArrayBuffer(file);
     event.target.value = '';
@@ -584,44 +564,6 @@ export default function DashboardPage() {
                 </Button>
               </CardContent>
             </Card>
-            
-            {uploadedFileInfo && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center text-sm">
-                    <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" />
-                    File Uploaded Successfully
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="text-sm">
-                    <strong>File:</strong> {uploadedFileInfo.name}
-                  </div>
-                  <div className="text-sm">
-                    <strong>Size:</strong> {uploadedFileInfo.size}
-                  </div>
-                  <div className="text-sm">
-                    <strong>Type:</strong> {uploadedFileInfo.type}
-                  </div>
-                  {uploadedFileInfo.hasFormatting && (
-                    <div className="flex items-center gap-1 text-sm text-green-600">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      Formatting preservation enabled
-                    </div>
-                  )}
-                  {activeSheetName && (
-                    <div className="text-sm">
-                      <strong>Active Sheet:</strong> {activeSheetName}
-                    </div>
-                  )}
-                  {rows.length > 0 && (
-                    <div className="text-sm">
-                      <strong>Records:</strong> {rows.length} attendees loaded
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
             
             <Card>
               <CardHeader>
