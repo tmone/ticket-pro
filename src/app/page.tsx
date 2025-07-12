@@ -313,35 +313,16 @@ export default function DashboardPage() {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: "array" });
         setWorkbook(wb);
-        setSheetNames(wb.SheetNames);
+        const sheetNames = wb.SheetNames;
+        setSheetNames(sheetNames);
 
         // Reset previous data
         setHeaders([]);
         setRows([]);
         
-        if (wb.SheetNames.length > 0) {
-            setSelectedSheet(wb.SheetNames[0]);
-            // Auto-process the first sheet
-            const worksheet = wb.Sheets[wb.SheetNames[0]];
-            const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet);
-
-            if (jsonData.length > 0) {
-              const firstRow = jsonData[0];
-              const extractedHeaders = Object.keys(firstRow).filter(h => h !== '__rowNum__');
-              const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
-              setHeaders(extractedHeaders);
-              setRows(initialRows);
-              toast({
-                title: "Success!",
-                description: `Successfully imported ${jsonData.length} rows from sheet: ${wb.SheetNames[0]}.`,
-              });
-            } else {
-              toast({
-                variant: "destructive",
-                title: "No Data",
-                description: `The first sheet (${wb.SheetNames[0]}) is empty.`
-              });
-            }
+        if (sheetNames.length > 0) {
+            // Always process the first sheet by default
+            processSheetData(sheetNames[0]);
         } else {
             toast({
                 variant: "destructive",
