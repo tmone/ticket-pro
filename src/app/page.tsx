@@ -240,8 +240,11 @@ export default function DashboardPage() {
     if (!uniqueCode) return;
 
     if (uniqueCode === lastCheckedInCode) {
-        checkInForm.reset();
-        return; // Skip if it's the same as the last successful scan
+      checkInForm.reset();
+      if (isContinuous && scanSourceRef.current === 'camera') {
+        startScan();
+      }
+      return; 
     }
     
     const inputCode = uniqueCode.trim().toLowerCase();
@@ -293,9 +296,11 @@ export default function DashboardPage() {
       
       if (foundRow.checkedInTime) {
         const timeSinceCheckIn = new Date().getTime() - new Date(foundRow.checkedInTime).getTime();
-        // If checked in within the last 60 seconds, just ignore it and clear the form.
         if (timeSinceCheckIn < 60000) {
             checkInForm.reset();
+            if (isContinuous && scanSourceRef.current === 'camera') {
+              startScan();
+            }
             return;
         }
         setScannedRow(foundRow);
@@ -316,7 +321,7 @@ export default function DashboardPage() {
 
     setIsAlertOpen(true);
     if(isScanning) stopScan();
-  }, [rows, headers, isScanning, stopScan, lastCheckedInCode, checkInForm]);
+  }, [rows, headers, isScanning, stopScan, lastCheckedInCode, checkInForm, isContinuous, startScan]);
 
   const tick = React.useCallback(() => {
     if (isScanning && videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
@@ -687,5 +692,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
