@@ -40,6 +40,7 @@ import {
   Camera,
   FileSpreadsheet
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const checkInSchema = z.object({
   uniqueCode: z.string().min(1, { message: "Code is required." }),
@@ -55,6 +56,7 @@ export default function DashboardPage() {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const animationFrameIdRef = React.useRef<number>();
   const scanSourceRef = React.useRef<'camera' | 'form' | null>(null);
+  const rowRefs = React.useRef<(HTMLTableRowElement | null)[]>([]);
 
   const [headers, setHeaders] = React.useState<string[]>([]);
   const [rows, setRows] = React.useState<Record<string, any>[]>([]);
@@ -70,15 +72,20 @@ export default function DashboardPage() {
   const [workbook, setWorkbook] = React.useState<WorkBook | null>(null);
   const [sheetNames, setSheetNames] = React.useState<string[]>([]);
   const [selectedSheet, setSelectedSheet] = React.useState<string>("");
+  const [highlightedRowIndex, setHighlightedRowIndex] = React.useState<number | null>(null);
 
   const checkInForm = useForm<z.infer<typeof checkInSchema>>({
     resolver: zodResolver(checkInSchema),
     defaultValues: { uniqueCode: "" },
   });
 
+  // The order of these functions is important to avoid "cannot access before initialization" errors.
+  // We define dependent functions after their dependencies.
+
   const stopScan = React.useCallback(() => {
     if (animationFrameIdRef.current) {
         cancelAnimationFrame(animationFrameIdRef.current);
+        animationFrameIdRef.current = undefined;
     }
     setIsScanning(false);
     if (videoRef.current && videoRef.current.srcObject) {
@@ -88,19 +95,38 @@ export default function DashboardPage() {
     }
   }, []);
   
-  const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
-    const { uniqueCode } = data;
-    if (!uniqueCode) return;
-    
-    if (scanSourceRef.current === 'camera') {
-      stopScan();
+  const startScan = React.useCallback(async () => {
+    setScanError(null);
+    if (isScanning || animationFrameIdRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setIsScanning(true);
+        // The `tick` function is defined later, but this is safe because `startScan` is called by user interaction.
+        animationFrameIdRef.current = requestAnimationFrame(tick);
+      }
+    } catch (err) {
+      console.error("Camera access error:", err);
+      setScanError("Camera access denied. Please enable it in your browser settings.");
+      setIsScanning(false);
     }
-    
-    if (isContinuous && scanSourceRef.current === 'camera' && uniqueCode === lastCheckedInCode) {
-      checkInForm.reset();
-      // Directly call restart without going through the alert dialog flow for silent skips
+  }, [isScanning]); // `tick` is defined outside and doesn't need to be a dependency
+
+  const restartContinuousScan = React.useCallback(() => {
       stopScan();
       setTimeout(() => startScan(), 100);
+  }, [startScan, stopScan]);
+
+
+  let handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
+    const { uniqueCode } = data;
+    if (!uniqueCode) return;
+
+    if (isContinuous && scanSourceRef.current === 'camera' && uniqueCode === lastCheckedInCode) {
+      checkInForm.reset();
+      restartContinuousScan();
       return; 
     }
     
@@ -153,18 +179,18 @@ export default function DashboardPage() {
             break;
         }
     }
-
+    
+    setHighlightedRowIndex(foundRowIndex !== -1 ? foundRowIndex : null);
+    if(foundRowIndex !== -1) {
+        rowRefs.current[foundRowIndex]?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+        })
+    }
 
     if (foundRowIndex !== -1) {
       const foundRowData = rows[foundRowIndex];
       if (foundRowData.checkedInTime) {
-        const timeSinceCheckIn = new Date().getTime() - new Date(foundRowData.checkedInTime).getTime();
-        if (isContinuous && scanSourceRef.current === 'camera' && timeSinceCheckIn < 60000) {
-            checkInForm.reset();
-            stopScan();
-            setTimeout(() => startScan(), 100);
-            return;
-        }
         setScannedRow(foundRowData);
         setDialogState('duplicate');
         setIsAlertOpen(true);
@@ -183,11 +209,8 @@ export default function DashboardPage() {
       setDialogState('not_found');
       setIsAlertOpen(true);
     }
-    
-  // We need to disable the exhaustive-deps rule here because adding startScan would create a dependency cycle.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, headers, stopScan, lastCheckedInCode, checkInForm, isContinuous]);
-  
+  }, [rows, headers, checkInForm, isContinuous, lastCheckedInCode, restartContinuousScan]);
+
   const tick = React.useCallback(() => {
     if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
         const video = videoRef.current;
@@ -202,38 +225,21 @@ export default function DashboardPage() {
             const code = jsqr(imageData.data, imageData.width, imageData.height);
 
             if (code && code.data) {
+                if (animationFrameIdRef.current) {
+                  cancelAnimationFrame(animationFrameIdRef.current);
+                  animationFrameIdRef.current = undefined;
+                }
                 scanSourceRef.current = 'camera';
-                // Stop the loop, handleCheckIn will take over
+                stopScan();
                 handleCheckIn({ uniqueCode: code.data });
                 return; 
             }
         }
     }
-    animationFrameIdRef.current = requestAnimationFrame(tick);
-  }, [handleCheckIn]);
-
-  const startScan = React.useCallback(async () => {
-    setScanError(null);
-    if (isScanning) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setIsScanning(true);
+    if (isScanning) {
         animationFrameIdRef.current = requestAnimationFrame(tick);
-      }
-    } catch (err) {
-      console.error("Camera access error:", err);
-      setScanError("Camera access denied. Please enable it in your browser settings.");
-      setIsScanning(false);
     }
-  }, [isScanning, tick]);
-
-  const restartContinuousScan = React.useCallback(() => {
-      stopScan();
-      setTimeout(() => startScan(), 100);
-  }, [startScan, stopScan]);
+  }, [handleCheckIn, isScanning, stopScan]);
 
 
   React.useEffect(() => {
@@ -284,6 +290,9 @@ export default function DashboardPage() {
     setRows(initialRows);
     setScannedRow(null);
     setSelectedSheet(sheetName);
+    setHighlightedRowIndex(null);
+    rowRefs.current = [];
+
 
     toast({
       title: "Success!",
@@ -541,7 +550,7 @@ export default function DashboardPage() {
                         onSubmit={(e) => {
                             e.preventDefault();
                             scanSourceRef.current = 'form';
-                            checkInForm.handleSubmit(handleCheckIn)();
+                            handleCheckIn({ uniqueCode: checkInForm.getValues("uniqueCode") });
                         }} 
                         className="space-y-4"
                     >
@@ -594,7 +603,13 @@ export default function DashboardPage() {
                         <TableBody>
                             {rows.length > 0 ? (
                                 rows.map((row, rowIndex) => (
-                                    <TableRow key={rowIndex}>
+                                    <TableRow 
+                                      key={rowIndex}
+                                      ref={(el) => (rowRefs.current[rowIndex] = el)}
+                                      className={cn(
+                                        highlightedRowIndex === rowIndex && 'bg-primary/10'
+                                      )}
+                                    >
                                         {headers.map(header => <TableCell key={header}>{String(row[header] ?? '')}</TableCell>)}
                                         <TableCell>
                                             <Badge variant={row.checkedInTime ? "default" : "secondary"} className={row.checkedInTime ? "bg-accent text-accent-foreground" : ""}>
