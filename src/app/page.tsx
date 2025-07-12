@@ -85,7 +85,6 @@ export default function DashboardPage() {
   });
 
   React.useEffect(() => {
-    // Fetch session data to update UI (e.g., show user avatar)
     getSession().then(setSession);
   }, []);
 
@@ -119,7 +118,6 @@ export default function DashboardPage() {
   }, [isScanning]);
 
   React.useEffect(() => {
-    // Cleanup camera on component unmount
     return () => {
       stopScan();
     };
@@ -127,8 +125,7 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     await logout();
-    setSession(null); // Clear session state on client
-    // No need to redirect, the page will just show the login button
+    setSession(null); 
   };
 
   const processSheetData = (jsonData: Record<string, any>[]) => {
@@ -165,12 +162,14 @@ export default function DashboardPage() {
       const result = await fetchGoogleSheetData(data.url);
       
       if (result.error) {
-        // If the error is about authentication, redirect to login to get permissions.
+        // This is the critical change. We ONLY redirect if the error is specifically
+        // about authentication. Any other error will be displayed in a toast and
+        // the process will stop, preventing the redirect loop.
         if (result.error.includes('Authentication required')) {
           router.push('/api/auth/login/google');
           return; // Stop execution here
         }
-        // For other errors, just show the message.
+        // For all other errors, just throw them to be caught by the catch block below.
         throw new Error(result.error);
       }
 
@@ -178,18 +177,13 @@ export default function DashboardPage() {
         processSheetData(result.data);
       }
     } catch (error: any) {
-      // THIS IS THE CRITICAL CHANGE
-      // Only redirect if the specific authentication error occurs.
-      // For all other errors, just show the toast and stop.
-      if (error && typeof error.message === 'string' && error.message.includes('Authentication required')) {
-        router.push('/api/auth/login/google');
-      } else {
+        // This block now handles ALL errors except the specific authentication one.
+        // It will show a toast and will NOT redirect.
         toast({
           variant: "destructive",
           title: "An Error Occurred",
           description: error.message || "Could not fetch or process data. Please check the console for more details.",
         });
-      }
     } finally {
       setIsFetching(false);
     }
@@ -202,17 +196,15 @@ export default function DashboardPage() {
     
     let searchCode = uniqueCode.trim();
 
-    // Basic attempt to extract value from a URL-like string
     try {
       const url = new URL(searchCode);
       const params = url.searchParams;
-      // Try common parameter names or the first one
       const potentialCode = params.get('id') || params.get('code') || params.values().next().value;
       if (potentialCode) {
         searchCode = potentialCode.trim();
       }
     } catch (e) {
-      // Not a valid URL, continue with the original code
+      // Not a valid URL
     }
 
     const rowIndex = rows.findIndex(row =>
@@ -260,11 +252,10 @@ export default function DashboardPage() {
             if (code && code.data) {
                 stopScan();
                 checkInForm.setValue("uniqueCode", code.data, { shouldValidate: true });
-                // Use a timeout to ensure state updates before submitting form
                 setTimeout(() => {
                     checkInForm.handleSubmit(handleCheckIn)();
                 }, 0);
-                return; // Stop the loop
+                return;
             }
         }
     }
@@ -340,7 +331,7 @@ export default function DashboardPage() {
       if (isContinuous && dialogState === 'success' && isAlertOpen) {
           const timer = setTimeout(() => {
               handleAlertClose();
-          }, 1500); // Auto-close success dialog after 1.5s in continuous mode
+          }, 1500); 
           return () => clearTimeout(timer);
       }
   }, [isAlertOpen, dialogState, isContinuous, handleAlertClose]);

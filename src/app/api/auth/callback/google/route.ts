@@ -11,14 +11,18 @@ const OAUTH2_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost
 
 export async function GET(req: NextRequest) {
   if (!OAUTH2_CLIENT_ID || !OAUTH2_CLIENT_SECRET) {
-    return NextResponse.json({ error: "Google OAuth2 credentials are not configured in environment variables. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your .env.local file." }, { status: 500 });
+    const errorMessage = "Google OAuth2 credentials are not configured in environment variables. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your .env.local file.";
+    console.error(`AUTH_CALLBACK_ERROR: ${errorMessage}`);
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 
   const session = await getIronSession<SessionData>(cookies(), sessionOptions);
   
   const code = req.nextUrl.searchParams.get('code');
   if (!code) {
-    return NextResponse.json({ error: 'Authorization code not found in callback URL.' }, { status: 400 });
+    const errorMessage = 'Authorization code not found in callback URL.';
+    console.error(`AUTH_CALLBACK_ERROR: ${errorMessage}`);
+    return NextResponse.json({ error: errorMessage }, { status: 400 });
   }
 
   try {
@@ -32,8 +36,9 @@ export async function GET(req: NextRequest) {
     try {
       const response = await oauth2Client.getToken(code);
       tokens = response.tokens;
+      console.log('Successfully received tokens from Google.');
     } catch (error: any) {
-        console.error('Error getting token from Google:', error.response?.data || error.message);
+        console.error('AUTH_CALLBACK_ERROR: Error getting token from Google:', error.response?.data || error.message);
         return NextResponse.json({ 
             error: 'Failed to exchange authorization code for tokens.',
             details: error.response?.data || error.message
@@ -51,15 +56,15 @@ export async function GET(req: NextRequest) {
     try {
         const { data } = await oauth2.userinfo.get();
         userInfo = data;
+        console.log('Successfully fetched user info from Google.');
     } catch(error: any) {
-        console.error('Error fetching user info from Google:', error.response?.data || error.message);
+        console.error('AUTH_CALLBACK_ERROR: Error fetching user info from Google:', error.response?.data || error.message);
         return NextResponse.json({ 
             error: 'Failed to fetch user profile information from Google.',
             details: error.response?.data || error.message
         }, { status: 500 });
     }
 
-    // Save tokens and user info in the session
     session.isLoggedIn = true;
     session.tokens = tokens;
     session.name = userInfo.name || 'User';
@@ -69,11 +74,10 @@ export async function GET(req: NextRequest) {
     await session.save();
     console.log('Session saved successfully for user:', userInfo.email);
 
-    // Redirect to the dashboard
     return NextResponse.redirect(new URL('/', req.nextUrl));
 
   } catch (error: any) {
-    console.error('An unexpected error occurred during Google OAuth callback:', error);
+    console.error('AUTH_CALLBACK_ERROR: An unexpected error occurred during Google OAuth callback:', error);
     return NextResponse.json({ 
         error: 'An unexpected error occurred during the authentication process.',
         details: error.message

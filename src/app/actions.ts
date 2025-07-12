@@ -52,8 +52,6 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
     }
     const spreadsheetId = match[1];
     
-    // To keep it simple, we'll fetch the first sheet's data.
-    // A more advanced version could let the user select a sheet.
     const sheetMetadata = await sheets.spreadsheets.get({ spreadsheetId });
     const firstSheetTitle = sheetMetadata.data.sheets?.[0]?.properties?.title;
 
@@ -61,7 +59,6 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
       throw new Error("Could not find any sheets in the spreadsheet.");
     }
     
-    // Fetches all data from the first sheet.
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: firstSheetTitle,
@@ -69,14 +66,14 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
 
     const values = response.data.values;
     if (!values || values.length === 0) {
-      return { data: [] }; // Return empty data instead of error for empty sheets
+      return { data: [] }; 
     }
 
     const jsonData = toJsonObject(values);
     return { data: jsonData };
   } catch (error: any) {
-    console.error('Error fetching Google Sheet:', error);
-    // Provide a more user-friendly error message for common issues
+    console.error('CRITICAL ERROR fetching Google Sheet:', error);
+    
     if (error.code === 403) {
       return { error: 'Permission Denied (403). Make sure you have access to this Google Sheet and have granted the necessary permissions. You may need to log out and log back in.' };
     }
@@ -84,7 +81,8 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
       return { error: `Not Found (404). The Google Sheet could not be found. Make sure the URL is correct.` };
     }
     if (error.code === 401) {
-        return { error: `Authentication failed (401). Your session may have expired. Please log out and sign in again.` };
+        // This specific error message will be caught on the client to trigger re-login.
+        return { error: `Authentication required. Please log in.` };
     }
     return { error: error.message || 'An unknown error occurred while fetching the sheet.' };
   }
@@ -92,14 +90,11 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
 
 export async function getSession(): Promise<SessionData> {
   const session = await getIronSession<SessionData>(cookies(), sessionOptions);
-  // Return a plain object to avoid non-serializable data issues in Client Components
   return {
     isLoggedIn: !!session.isLoggedIn,
     name: session.name,
     email: session.email,
     picture: session.picture,
-    // Do not return session.tokens here unless needed on the client,
-    // as it might also contain non-serializable data.
   };
 }
 
