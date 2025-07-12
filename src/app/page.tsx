@@ -391,13 +391,17 @@ export default function DashboardPage() {
     }
 
     try {
-        // Create a deep copy of the workbook to avoid mutating state directly
-        // Note: This is a shallow copy of sheets, but we'll be replacing one sheet entirely.
-        // A proper deep copy is complex with xlsx, but this approach is safe.
+        // Create a safe, mutable deep copy of the workbook to avoid state mutation
         const newWorkbook: WorkBook = {
-            ...workbook,
-            Sheets: { ...workbook.Sheets }
+            Sheets: {},
+            SheetNames: workbook.SheetNames,
+            Props: workbook.Props
         };
+        for (const name of workbook.SheetNames) {
+           // This is a shallow copy of the sheet object, which is fine
+           // because we'll only be modifying cell values, not the sheet object itself.
+           newWorkbook.Sheets[name] = {...workbook.Sheets[name]};
+        }
 
         const ws = newWorkbook.Sheets[activeSheetName];
         if (!ws) {
@@ -411,23 +415,22 @@ export default function DashboardPage() {
         
         // Find the first empty column in the header row to add "Checked-In At"
         const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
-        const headerRow = range.s.r;
-        let checkInColIndex = range.e.c + 1; // Start checking from the column after the last one
+        const headerRowIndex = range.s.r;
+        let checkInColIndex = range.e.c + 1;
 
         // Add the "Checked-In At" header
-        const headerCellAddress = XLSX.utils.encode_cell({ c: checkInColIndex, r: headerRow });
+        const headerCellAddress = XLSX.utils.encode_cell({ c: checkInColIndex, r: headerRowIndex });
         XLSX.utils.sheet_add_aoa(ws, [["Checked-In At"]], { origin: headerCellAddress });
 
-        // Get original data from sheet to match rows
-        const originalData = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
-
-        // Iterate through checked-in rows and update the sheet
+        // Iterate through checked-in rows and update the sheet cell by cell
         rows.forEach((row, rowIndex) => {
             if (row.checkedInTime) {
-                // +1 to account for the header row in Excel sheet
-                const excelRowIndex = rowIndex + 1; 
+                // +1 to account for the header row in Excel sheet (assuming header is on first row)
+                const excelRowIndex = rowIndex + 1 + headerRowIndex;
                 const cellAddress = XLSX.utils.encode_cell({ c: checkInColIndex, r: excelRowIndex });
                 const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
+                
+                // Add the value to the specific cell
                 XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
             }
         });
