@@ -406,11 +406,8 @@ export default function DashboardPage() {
     if (isContinuous) {
         inputRef.current?.focus(); // Keep focus on input only in continuous mode
         setLastCheckedInCode(null); // Reset for the next scan
-        if (isScanning === false) {
-          setTimeout(() => startScan(), 100);
-        }
     }
-  }, [isContinuous, checkInForm, startScan, isScanning]);
+  }, [isContinuous, checkInForm]);
 
   React.useEffect(() => {
       if (isContinuous && dialogState === 'success' && isAlertOpen) {
@@ -669,5 +666,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
