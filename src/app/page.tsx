@@ -100,7 +100,6 @@ export default function DashboardPage() {
     
     // If continuous scanning from camera and the code is a duplicate of the last one, ignore it.
     if (isContinuous && scanSourceRef.current === 'camera' && uniqueCode === lastCheckedInCode) {
-        // Just restart the scan without showing any dialog
         if (isContinuous && scanSourceRef.current === 'camera') {
             stopScan();
             setTimeout(() => startScan(), 100);
@@ -227,7 +226,6 @@ export default function DashboardPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Small delay to allow the stream to start before playing
         await new Promise(resolve => setTimeout(resolve, 100));
         await videoRef.current.play();
         setIsScanning(true);
@@ -316,12 +314,10 @@ export default function DashboardPage() {
         const sheetNames = wb.SheetNames;
         setSheetNames(sheetNames);
 
-        // Reset previous data
         setHeaders([]);
         setRows([]);
         
         if (sheetNames.length > 0) {
-            // Always process the first sheet by default
             processSheetData(sheetNames[0]);
         } else {
             toast({
@@ -349,7 +345,6 @@ export default function DashboardPage() {
         })
     }
     reader.readAsArrayBuffer(file);
-    // Reset file input to allow uploading the same file again
     event.target.value = '';
   };
   
@@ -700,5 +695,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
