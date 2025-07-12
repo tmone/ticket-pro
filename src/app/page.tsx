@@ -178,11 +178,18 @@ export default function DashboardPage() {
         processSheetData(result.data);
       }
     } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Import Failed",
-        description: error.message || "Could not fetch or process data. Please check the URL and sheet permissions.",
-      });
+      // THIS IS THE CRITICAL CHANGE
+      // Only redirect if the specific authentication error occurs.
+      // For all other errors, just show the toast and stop.
+      if (error && typeof error.message === 'string' && error.message.includes('Authentication required')) {
+        router.push('/api/auth/login/google');
+      } else {
+        toast({
+          variant: "destructive",
+          title: "An Error Occurred",
+          description: error.message || "Could not fetch or process data. Please check the console for more details.",
+        });
+      }
     } finally {
       setIsFetching(false);
     }
@@ -602,5 +609,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
