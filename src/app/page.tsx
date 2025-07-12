@@ -37,6 +37,7 @@ import { Alert, AlertTitle, AlertDescription as AlertDescriptionUI } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   TicketCheck,
   Upload,
@@ -53,6 +54,7 @@ import { cn } from "@/lib/utils";
 import { UniversalExcelHandler } from "@/lib/excel-handler";
 import { GoogleSheetsConnector } from "@/components/google-sheets-connector";
 import { useGoogleSheetsApi } from "@/hooks/use-google-sheets-api";
+import { QRCodeModal } from "@/components/qr-code-modal";
 
 // Note: Excel utility functions moved to src/lib/excel-utils.ts for better organization
 
@@ -93,12 +95,22 @@ export default function DashboardPage() {
   const [isClient, setIsClient] = React.useState(false);
   const [dataSource, setDataSource] = React.useState<'excel' | 'google-sheets'>('excel');
   const [isGoogleSheetsConnected, setIsGoogleSheetsConnected] = React.useState(false);
+  const [selectedRows, setSelectedRows] = React.useState<Set<number>>(new Set());
+  const [qrCodeColumn, setQrCodeColumn] = React.useState<string>('');
+  const [qrModalOpen, setQrModalOpen] = React.useState(false);
+  const [qrModalData, setQrModalData] = React.useState<string>('');
   
   // Google Sheets integration - single instance
   const googleSheetsApi = useGoogleSheetsApi();
   
   React.useEffect(() => {
     setIsClient(true);
+    
+    // Load saved QR code column from localStorage
+    const savedQrCodeColumn = localStorage.getItem('qrCodeColumn');
+    if (savedQrCodeColumn) {
+      setQrCodeColumn(savedQrCodeColumn);
+    }
   }, []);
   
   // Safe date formatter to prevent hydration mismatch
@@ -285,6 +297,37 @@ export default function DashboardPage() {
       router.refresh();
     } catch (error) {
       console.error('Logout error:', error);
+    }
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedRows(new Set(rows.map((_, index) => index)));
+    } else {
+      setSelectedRows(new Set());
+    }
+  };
+
+  const handleSelectRow = (index: number, checked: boolean) => {
+    const newSelectedRows = new Set(selectedRows);
+    if (checked) {
+      newSelectedRows.add(index);
+    } else {
+      newSelectedRows.delete(index);
+    }
+    setSelectedRows(newSelectedRows);
+  };
+
+  const handleRowClick = (row: Record<string, any>, event: React.MouseEvent) => {
+    // Don't trigger if clicking on checkbox
+    if ((event.target as HTMLElement).closest('button') || 
+        (event.target as HTMLElement).closest('[role="checkbox"]')) {
+      return;
+    }
+    
+    if (qrCodeColumn && row[qrCodeColumn]) {
+      setQrModalData(String(row[qrCodeColumn]));
+      setQrModalOpen(true);
     }
   };
 
@@ -495,6 +538,14 @@ export default function DashboardPage() {
         setRows(sheetData.rows);
         setActiveSheetName(sheetName);
         
+        // Restore saved QR code column if it exists in headers
+        const savedQrCodeColumn = localStorage.getItem('qrCodeColumn');
+        if (savedQrCodeColumn && sheetData.headers?.includes(savedQrCodeColumn)) {
+          setQrCodeColumn(savedQrCodeColumn);
+        } else {
+          setQrCodeColumn(''); // Reset QR code column if saved column doesn't exist
+        }
+        
         toast({
           title: "Success!",
           description: `Successfully imported ${sheetData.rows.length} rows from sheet: ${sheetName}.`,
@@ -518,6 +569,16 @@ export default function DashboardPage() {
     setActiveSheetName('Google Sheets');
     setScannedRow(null);
     setHighlightedRowIndex(null);
+    
+    setSelectedRows(new Set());
+    
+    // Restore saved QR code column if it exists in headers
+    const savedQrCodeColumn = localStorage.getItem('qrCodeColumn');
+    if (savedQrCodeColumn && data.headers?.includes(savedQrCodeColumn)) {
+      setQrCodeColumn(savedQrCodeColumn);
+    } else {
+      setQrCodeColumn(''); // Reset QR code column if saved column doesn't exist
+    }
     rowRefs.current = [];
     
     toast({
@@ -748,14 +809,53 @@ export default function DashboardPage() {
           <div className="lg:col-span-1 xl:col-span-2">
             <Card>
               <CardHeader>
-                  <CardTitle>Attendee List</CardTitle>
-                  <CardDescription>A list of all imported attendees and their check-in status.</CardDescription>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Attendee List</CardTitle>
+                      <CardDescription>A list of all imported attendees and their check-in status.</CardDescription>
+                    </div>
+                    {headers.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor="qr-column" className="text-sm">QR Code Column:</Label>
+                        <Select value={qrCodeColumn || "__none__"} onValueChange={(value) => {
+                          const newValue = value === "__none__" ? "" : value;
+                          setQrCodeColumn(newValue);
+                          if (newValue) {
+                            localStorage.setItem('qrCodeColumn', newValue);
+                          } else {
+                            localStorage.removeItem('qrCodeColumn');
+                          }
+                        }}>
+                          <SelectTrigger id="qr-column" className="w-[200px]">
+                            <SelectValue placeholder="Select column" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">None</SelectItem>
+                            {headers.map((header) => (
+                              <SelectItem key={header} value={header}>
+                                {header}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
               </CardHeader>
               <CardContent>
                 <div className="max-h-[600px] overflow-auto">
                     <Table>
                         <TableHeader>
                             <TableRow>
+                                {headers.length > 0 && (
+                                    <TableHead className="w-[50px] text-center">
+                                        <Checkbox 
+                                            checked={selectedRows.size === rows.length && rows.length > 0}
+                                            onCheckedChange={handleSelectAll}
+                                            aria-label="Select all"
+                                        />
+                                    </TableHead>
+                                )}
                                 {headers.map(header => <TableHead key={header}>{header}</TableHead>)}
                                 {headers.length > 0 && (
                                     <>
@@ -774,9 +874,19 @@ export default function DashboardPage() {
                                           if (el) rowRefs.current[rowIndex] = el;
                                       }}
                                       className={cn(
-                                        highlightedRowIndex === rowIndex && 'bg-primary/10'
+                                        highlightedRowIndex === rowIndex && 'bg-primary/10',
+                                        selectedRows.has(rowIndex) && 'bg-muted/50',
+                                        qrCodeColumn && 'cursor-pointer hover:bg-muted/30'
                                       )}
+                                      onClick={(e) => handleRowClick(row, e)}
                                     >
+                                        <TableCell className="text-center">
+                                            <Checkbox 
+                                                checked={selectedRows.has(rowIndex)}
+                                                onCheckedChange={(checked) => handleSelectRow(rowIndex, !!checked)}
+                                                aria-label={`Select row ${rowIndex + 1}`}
+                                            />
+                                        </TableCell>
                                         {headers.map(header => (
                                             <TableCell key={header}>
                                                 {String(row[header] ?? '')}
@@ -794,7 +904,7 @@ export default function DashboardPage() {
                                 ))
                             ) : (
                                 <TableRow>
-                                    <TableCell colSpan={headers.length > 0 ? headers.length + 2 : 1} className="h-24 text-center">
+                                    <TableCell colSpan={headers.length > 0 ? headers.length + 3 : 1} className="h-24 text-center">
                                         No data loaded. Please upload an Excel file.
                                     </TableCell>
                                 </TableRow>
@@ -901,6 +1011,12 @@ export default function DashboardPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <QRCodeModal
+        open={qrModalOpen}
+        onOpenChange={setQrModalOpen}
+        data={qrModalData}
+      />
     </div>
   );
 }
