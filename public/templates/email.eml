@@ -1,0 +1,35 @@
+Subject: Vé tham dñ sñ kiÇn - {eventName}
+
+Kính chào {name},
+
+Chúng tôi xin chân thành c£m ¡n b¡n ã ng kı tham gia sñ kiÇn cça chúng tôi.
+
+THÔNG TIN Sğ KIÆN:
+- Tên sñ kiÇn: {eventName}
+- Thİi gian: {eventDate}
+- Ëa iÃm: {eventLocation}
+- Mã vé: {ticketCode}
+
+Vé iÇn tí cça b¡n ã °ãc ính kèm trong email này. Vui lòng:
+ L°u vé và mang theo khi tham dñ sñ kiÇn
+ ¿n úng giİ Ã °ãc check-in thu­n lãi
+ Liên hÇ vÛi chúng tôi n¿u có b¥t kó th¯c m¯c nào
+
+L¯U İ QUAN TRÌNG:
+- Vé chÉ có giá trË khi °ãc quét mã QR t¡i sñ kiÇn
+- Vui lòng không chia s» vé vÛi ng°İi khác
+- Mang theo gi¥y tİ tùy thân khi tham dñ
+
+N¿u b¡n có b¥t kó câu hÏi nào, vui lòng liên hÇ:
+=ç Email: {senderEmail}
+=Ş Hotline: {contactPhone}
+
+Chúng tôi r¥t mong °ãc g·p b¡n t¡i sñ kiÇn!
+
+Trân trÍng,
+{senderName}
+Ban TÕ Chéc
+
+---
+Email này °ãc gíi tñ Ùng të hÇ thÑng qu£n lı sñ kiÇn.
+Vui lòng không tr£ lİi trñc ti¿p email này.

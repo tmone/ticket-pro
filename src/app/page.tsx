@@ -50,6 +50,7 @@ import {
   FileSpreadsheet,
   CheckCircle,
   Archive,
+  Mail,
   LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -57,6 +58,7 @@ import { UniversalExcelHandler } from "@/lib/excel-handler";
 import { GoogleSheetsConnector } from "@/components/google-sheets-connector";
 import { useGoogleSheetsApi } from "@/hooks/use-google-sheets-api";
 import { QRCodeModal } from "@/components/qr-code-modal";
+import { EmailModal } from "@/components/email-modal";
 
 // Note: Excel utility functions moved to src/lib/excel-utils.ts for better organization
 
@@ -103,6 +105,8 @@ export default function DashboardPage() {
   const [qrModalData, setQrModalData] = React.useState<string>('');
   const [isGeneratingTickets, setIsGeneratingTickets] = React.useState(false);
   const [ticketProgress, setTicketProgress] = React.useState({ current: 0, total: 0 });
+  const [isEmailModalOpen, setIsEmailModalOpen] = React.useState(false);
+  const [emailColumn, setEmailColumn] = React.useState<string>('');
   
   // Google Sheets integration - single instance
   const googleSheetsApi = useGoogleSheetsApi();
@@ -114,6 +118,12 @@ export default function DashboardPage() {
     const savedQrCodeColumn = localStorage.getItem('qrCodeColumn');
     if (savedQrCodeColumn) {
       setQrCodeColumn(savedQrCodeColumn);
+    }
+    
+    // Load saved email column from localStorage
+    const savedEmailColumn = localStorage.getItem('emailColumn');
+    if (savedEmailColumn) {
+      setEmailColumn(savedEmailColumn);
     }
   }, []);
   
@@ -421,6 +431,33 @@ export default function DashboardPage() {
     }
   };
 
+  const handleSendEmails = () => {
+    if (!emailColumn || selectedRows.size === 0) {
+      toast({
+        title: "Error",
+        description: "Please select email column and at least one row",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsEmailModalOpen(true);
+  };
+
+  // Prepare email data for selected rows
+  const selectedEmailData = React.useMemo(() => {
+    if (!emailColumn || !qrCodeColumn) return [];
+    
+    return Array.from(selectedRows).map(index => {
+      const row = rows[index];
+      return {
+        email: String(row[emailColumn] || ''),
+        name: row['Name'] || row['name'] || row['Full Name'] || row['full_name'] || '', // Try common name columns
+        qrData: String(row[qrCodeColumn] || ''),
+        rowNumber: (index + 1).toString().padStart(4, '0')
+      };
+    }).filter(item => item.email && item.qrData); // Only include rows with email and QR data
+  }, [selectedRows, emailColumn, qrCodeColumn, rows]);
+
   const handleAlertClose = React.useCallback(() => {
     setIsAlertOpen(false);
     checkInForm.reset();
@@ -636,6 +673,14 @@ export default function DashboardPage() {
           setQrCodeColumn(''); // Reset QR code column if saved column doesn't exist
         }
         
+        // Restore saved email column if it exists in headers
+        const savedEmailColumn = localStorage.getItem('emailColumn');
+        if (savedEmailColumn && sheetData.headers?.includes(savedEmailColumn)) {
+          setEmailColumn(savedEmailColumn);
+        } else {
+          setEmailColumn(''); // Reset email column if saved column doesn't exist
+        }
+        
         toast({
           title: "Success!",
           description: `Successfully imported ${sheetData.rows.length} rows from sheet: ${sheetName}.`,
@@ -668,6 +713,14 @@ export default function DashboardPage() {
       setQrCodeColumn(savedQrCodeColumn);
     } else {
       setQrCodeColumn(''); // Reset QR code column if saved column doesn't exist
+    }
+    
+    // Restore saved email column if it exists in headers
+    const savedEmailColumn = localStorage.getItem('emailColumn');
+    if (savedEmailColumn && data.headers?.includes(savedEmailColumn)) {
+      setEmailColumn(savedEmailColumn);
+    } else {
+      setEmailColumn(''); // Reset email column if saved column doesn't exist
     }
     rowRefs.current = [];
     
@@ -905,53 +958,97 @@ export default function DashboardPage() {
                       <CardDescription>A list of all imported attendees and their check-in status.</CardDescription>
                     </div>
                     {headers.length > 0 && (
-                      <div className="flex items-center gap-2">
-                        <Label htmlFor="qr-column" className="text-sm">QR Code Column:</Label>
-                        <Select value={qrCodeColumn || "__none__"} onValueChange={(value) => {
-                          const newValue = value === "__none__" ? "" : value;
-                          setQrCodeColumn(newValue);
-                          if (newValue) {
-                            localStorage.setItem('qrCodeColumn', newValue);
-                          } else {
-                            localStorage.removeItem('qrCodeColumn');
-                          }
-                        }}>
-                          <SelectTrigger id="qr-column" className="w-[200px]">
-                            <SelectValue placeholder="Select column" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">None</SelectItem>
-                            {headers.map((header) => (
-                              <SelectItem key={header} value={header}>
-                                {header}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        
-                        {selectedRows.size > 0 && qrCodeColumn && (
-                          <div className="ml-4 flex flex-col gap-2">
-                            <Button
-                              onClick={handleDownloadSelectedTickets}
-                              variant="outline"
-                              disabled={isGeneratingTickets}
-                            >
-                              <Archive className="mr-2 h-4 w-4" />
-                              {isGeneratingTickets 
-                                ? `Generating... (${ticketProgress.current}/${ticketProgress.total})`
-                                : `Download Selected Tickets (${selectedRows.size})`
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="qr-column" className="text-sm">QR Code Column:</Label>
+                            <Select value={qrCodeColumn || "__none__"} onValueChange={(value) => {
+                              const newValue = value === "__none__" ? "" : value;
+                              setQrCodeColumn(newValue);
+                              if (newValue) {
+                                localStorage.setItem('qrCodeColumn', newValue);
+                              } else {
+                                localStorage.removeItem('qrCodeColumn');
                               }
-                            </Button>
-                            {isGeneratingTickets && (
-                              <div className="w-[250px]">
-                                <Progress 
-                                  value={ticketProgress.total > 0 ? (ticketProgress.current / ticketProgress.total) * 100 : 0} 
-                                  className="h-2"
-                                />
-                                <div className="text-xs text-muted-foreground mt-1 text-center">
-                                  {ticketProgress.current} / {ticketProgress.total} tickets processed
-                                </div>
+                            }}>
+                              <SelectTrigger id="qr-column" className="w-[200px]">
+                                <SelectValue placeholder="Select column" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">None</SelectItem>
+                                {headers.map((header) => (
+                                  <SelectItem key={header} value={header}>
+                                    {header}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="email-column" className="text-sm">Email Column:</Label>
+                            <Select value={emailColumn || "__none__"} onValueChange={(value) => {
+                              const newValue = value === "__none__" ? "" : value;
+                              setEmailColumn(newValue);
+                              if (newValue) {
+                                localStorage.setItem('emailColumn', newValue);
+                              } else {
+                                localStorage.removeItem('emailColumn');
+                              }
+                            }}>
+                              <SelectTrigger id="email-column" className="w-[200px]">
+                                <SelectValue placeholder="Select column" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">None</SelectItem>
+                                {headers.map((header) => (
+                                  <SelectItem key={header} value={header}>
+                                    {header}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        
+                        {selectedRows.size > 0 && (
+                          <div className="flex gap-2 flex-wrap">
+                            {qrCodeColumn && (
+                              <div className="flex flex-col gap-2">
+                                <Button
+                                  onClick={handleDownloadSelectedTickets}
+                                  variant="outline"
+                                  disabled={isGeneratingTickets}
+                                >
+                                  <Archive className="mr-2 h-4 w-4" />
+                                  {isGeneratingTickets 
+                                    ? `Generating... (${ticketProgress.current}/${ticketProgress.total})`
+                                    : `Download Selected Tickets (${selectedRows.size})`
+                                  }
+                                </Button>
+                                {isGeneratingTickets && (
+                                  <div className="w-[250px]">
+                                    <Progress 
+                                      value={ticketProgress.total > 0 ? (ticketProgress.current / ticketProgress.total) * 100 : 0} 
+                                      className="h-2"
+                                    />
+                                    <div className="text-xs text-muted-foreground mt-1 text-center">
+                                      {ticketProgress.current} / {ticketProgress.total} tickets processed
+                                    </div>
+                                  </div>
+                                )}
                               </div>
+                            )}
+                            
+                            {emailColumn && qrCodeColumn && (
+                              <Button
+                                onClick={handleSendEmails}
+                                variant="outline"
+                                disabled={isGeneratingTickets}
+                              >
+                                <Mail className="mr-2 h-4 w-4" />
+                                Send Emails ({selectedRows.size})
+                              </Button>
                             )}
                           </div>
                         )}
@@ -1133,6 +1230,12 @@ export default function DashboardPage() {
         open={qrModalOpen}
         onOpenChange={setQrModalOpen}
         data={qrModalData}
+      />
+      
+      <EmailModal
+        open={isEmailModalOpen}
+        onOpenChange={setIsEmailModalOpen}
+        selectedEmails={selectedEmailData}
       />
     </div>
   );
