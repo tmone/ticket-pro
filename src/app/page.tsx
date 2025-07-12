@@ -403,10 +403,12 @@ export default function DashboardPage() {
   const handleAlertClose = React.useCallback(() => {
     setIsAlertOpen(false);
     checkInForm.reset();
-    inputRef.current?.focus(); // Keep focus on input
-    setLastCheckedInCode(null); // Reset for the next scan
-    if (isContinuous && isScanning === false) {
-      setTimeout(() => startScan(), 100);
+    if (isContinuous) {
+        inputRef.current?.focus(); // Keep focus on input only in continuous mode
+        setLastCheckedInCode(null); // Reset for the next scan
+        if (isScanning === false) {
+          setTimeout(() => startScan(), 100);
+        }
     }
   }, [isContinuous, checkInForm, startScan, isScanning]);
 
