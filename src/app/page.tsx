@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
+import type { WorkBook } from "xlsx";
 import jsQR from "jsqr";
 
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import { Alert, AlertTitle, AlertDescription as AlertDialogDescriptionUI } from 
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   TicketCheck,
   Upload,
@@ -35,6 +37,7 @@ import {
   UserCheck,
   AlertTriangle,
   Camera,
+  FileSpreadsheet
 } from "lucide-react";
 
 const checkInSchema = z.object({
@@ -59,6 +62,10 @@ export default function DashboardPage() {
   const [isScanning, setIsScanning] = React.useState(false);
   const [scanError, setScanError] = React.useState<string | null>(null);
   const [isContinuous, setIsContinuous] = React.useState(false);
+
+  const [workbook, setWorkbook] = React.useState<WorkBook | null>(null);
+  const [sheetNames, setSheetNames] = React.useState<string[]>([]);
+  const [selectedSheet, setSelectedSheet] = React.useState<string>("");
 
   const checkInForm = useForm<z.infer<typeof checkInSchema>>({
     resolver: zodResolver(checkInSchema),
@@ -100,31 +107,53 @@ export default function DashboardPage() {
     };
   }, [stopScan]);
 
-  const processSheetData = (jsonData: Record<string, any>[]) => {
-      if (jsonData.length === 0) {
+  const processSheetData = (sheetName: string) => {
+    if (!workbook) {
         toast({
             variant: "destructive",
-            title: "No Data",
-            description: "The uploaded file is empty or could not be read."
+            title: "Workbook not found",
+            description: "Please upload an Excel file first."
         });
-        setHeaders([]);
-        setRows([]);
         return;
-      }
-      
-      const firstRow = jsonData[0];
-      const extractedHeaders = Object.keys(firstRow);
-      
-      const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
+    }
 
-      setHeaders(extractedHeaders);
-      setRows(initialRows);
-      setScannedRow(null);
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) {
+        toast({
+            variant: "destructive",
+            title: "Sheet not found",
+            description: `Sheet with name "${sheetName}" could not be found in the file.`
+        });
+        return;
+    }
 
+    const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet);
+
+    if (jsonData.length === 0) {
       toast({
-        title: "Success!",
-        description: `Successfully imported ${jsonData.length} rows.`,
+          variant: "destructive",
+          title: "No Data",
+          description: "The selected sheet is empty or could not be read."
       });
+      setHeaders([]);
+      setRows([]);
+      return;
+    }
+    
+    const firstRow = jsonData[0];
+    const extractedHeaders = Object.keys(firstRow);
+    
+    const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
+
+    setHeaders(extractedHeaders);
+    setRows(initialRows);
+    setScannedRow(null);
+    setSelectedSheet(sheetName);
+
+    toast({
+      title: "Success!",
+      description: `Successfully imported ${jsonData.length} rows from sheet: ${sheetName}.`,
+    });
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -135,11 +164,46 @@ export default function DashboardPage() {
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet);
-        processSheetData(jsonData);
+        const wb = XLSX.read(data, { type: "array" });
+        setWorkbook(wb);
+        setSheetNames(wb.SheetNames);
+
+        // Reset previous data
+        setHeaders([]);
+        setRows([]);
+        
+        if (wb.SheetNames.length > 0) {
+            setSelectedSheet(wb.SheetNames[0]);
+            // Auto-process the first sheet
+            const worksheet = wb.Sheets[wb.SheetNames[0]];
+            const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet);
+
+            if (jsonData.length > 0) {
+              const firstRow = jsonData[0];
+              const extractedHeaders = Object.keys(firstRow);
+              const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
+              setHeaders(extractedHeaders);
+              setRows(initialRows);
+              toast({
+                title: "Success!",
+                description: `Successfully imported ${jsonData.length} rows from sheet: ${wb.SheetNames[0]}.`,
+              });
+            } else {
+              toast({
+                variant: "destructive",
+                title: "No Data",
+                description: `The first sheet (${wb.SheetNames[0]}) is empty.`
+              });
+            }
+        } else {
+            toast({
+                variant: "destructive",
+                title: "No Sheets Found",
+                description: "The uploaded Excel file does not contain any sheets.",
+            });
+            setSelectedSheet("");
+        }
+        
       } catch (error) {
         console.error("Error processing Excel file:", error);
         toast({
@@ -160,6 +224,12 @@ export default function DashboardPage() {
     // Reset file input to allow uploading the same file again
     event.target.value = '';
   };
+  
+  const handleSheetSelect = (sheetName: string) => {
+    if (sheetName) {
+        processSheetData(sheetName);
+    }
+  };
 
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
@@ -179,9 +249,9 @@ export default function DashboardPage() {
     }
 
     const rowIndex = rows.findIndex(row =>
-      Object.values(row).some(
-        cellValue => String(cellValue).trim().toLowerCase() === searchCode.toLowerCase()
-      )
+        headers.some(header => 
+            String(row[header]).trim().toLowerCase() === searchCode.toLowerCase()
+        )
     );
 
     if (rowIndex !== -1) {
@@ -205,7 +275,7 @@ export default function DashboardPage() {
 
     setIsAlertOpen(true);
     if(isScanning) stopScan();
-  }, [rows, isScanning, stopScan]);
+  }, [rows, headers, isScanning, stopScan]);
 
   const tick = React.useCallback(() => {
     if (isScanning && videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
@@ -315,7 +385,7 @@ export default function DashboardPage() {
             <h1 className="text-xl font-bold">TicketCheck Pro</h1>
         </div>
         <div className="ml-auto flex items-center gap-4">
-            <Button onClick={handleExport} variant="outline" size="sm">
+            <Button onClick={handleExport} variant="outline" size="sm" disabled={rows.length === 0}>
                 <Download className="mr-2 h-4 w-4"/>
                 Export Report
             </Button>
@@ -328,10 +398,10 @@ export default function DashboardPage() {
               <CardHeader>
                 <CardTitle>Upload Attendee List</CardTitle>
                 <CardDescription>
-                    Select an Excel file (.xlsx, .xls, .csv) to upload your attendee data.
+                    Select an Excel file. If it has multiple sheets, you can choose which one to use.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <input
                     type="file"
                     ref={fileInputRef}
@@ -343,6 +413,22 @@ export default function DashboardPage() {
                     <Upload className="mr-2 h-4 w-4" />
                     Upload Excel File
                 </Button>
+                {sheetNames.length > 1 && (
+                    <div className="space-y-2">
+                        <Label htmlFor="sheet-select">Select a sheet</Label>
+                        <Select onValueChange={handleSheetSelect} value={selectedSheet}>
+                            <SelectTrigger id="sheet-select">
+                                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                                <SelectValue placeholder="Select a sheet" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {sheetNames.map(name => (
+                                    <SelectItem key={name} value={name}>{name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -388,7 +474,7 @@ export default function DashboardPage() {
                     <Checkbox id="continuous-scan" checked={isContinuous} onCheckedChange={(checked) => setIsContinuous(!!checked)} />
                     <Label htmlFor="continuous-scan" className="cursor-pointer">Continuous Scan</Label>
                 </div>
-                <Button type="button" onClick={handleScanButtonClick} className="w-full mb-4" variant="outline">
+                <Button type="button" onClick={handleScanButtonClick} className="w-full mb-4" variant="outline" disabled={rows.length === 0}>
                     <Camera className="mr-2 h-4 w-4" />
                     {isScanning ? 'Stop Camera' : 'Scan QR Code'}
                 </Button>
@@ -401,13 +487,13 @@ export default function DashboardPage() {
                                 <FormItem>
                                     <FormLabel>Unique Code</FormLabel>
                                     <FormControl>
-                                        <Input placeholder="Paste or type code here..." {...field} />
+                                        <Input placeholder="Paste or type code here..." {...field} disabled={rows.length === 0} />
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
                             )}
                         />
-                        <Button type="submit" className="w-full bg-accent hover:bg-accent/90">
+                        <Button type="submit" className="w-full bg-accent hover:bg-accent/90" disabled={rows.length === 0}>
                            <TicketCheck className="mr-2 h-4 w-4"/> Check In
                         </Button>
                     </form>
