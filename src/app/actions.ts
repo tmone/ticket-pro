@@ -83,9 +83,17 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
   }
 }
 
-export async function getSession() {
+export async function getSession(): Promise<SessionData> {
   const session = await getIronSession<SessionData>(cookies(), sessionOptions);
-  return session;
+  // Return a plain object to avoid non-serializable data issues in Client Components
+  return {
+    isLoggedIn: session.isLoggedIn,
+    name: session.name,
+    email: session.email,
+    picture: session.picture,
+    // Do not return session.tokens here unless needed on the client,
+    // as it might also contain non-serializable data.
+  };
 }
 
 export async function logout() {
