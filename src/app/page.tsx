@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
-import type { WorkBook } from "xlsx";
+import type { WorkBook, WorkSheet } from "xlsx";
 import jsqr from "jsqr";
 
 import { Button } from "@/components/ui/button";
@@ -271,6 +271,7 @@ export default function DashboardPage() {
 
     const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
       defval: '',
+      header: 1, // Read as an array of arrays
     });
 
     if (jsonData.length < 1) {
@@ -284,20 +285,18 @@ export default function DashboardPage() {
       return;
     }
     
-    const headerSet = new Set<string>();
-    jsonData.forEach(row => {
-        Object.keys(row).forEach(key => {
-            if (key !== '__rowNum__') {
-                headerSet.add(key);
-            }
-        });
+    const headerRow = jsonData[0] as string[];
+    const dataRows = jsonData.slice(1);
+
+    const extractedHeaders = headerRow.map(h => String(h));
+
+    const processedRows = dataRows.map((rowArray: any[]) => {
+      const rowObject: Record<string, any> = { checkedInTime: null };
+      extractedHeaders.forEach((header, index) => {
+        rowObject[header] = rowArray[index];
+      });
+      return rowObject;
     });
-    const extractedHeaders = Array.from(headerSet);
-    
-    const processedRows = jsonData.map(row => ({
-      ...row,
-      checkedInTime: null
-    }));
 
     setHeaders(extractedHeaders);
     setRows(processedRows);
@@ -394,34 +393,48 @@ export default function DashboardPage() {
         return;
     }
 
-    // Create a new workbook object to avoid mutating state directly.
-    const newWorkbook: WorkBook = {
-        SheetNames: [...workbook.SheetNames],
-        Sheets: {}
-    };
+    // Deep copy the workbook to avoid mutating the original state object.
+    const newWorkbook = JSON.parse(JSON.stringify(workbook));
 
-    // Deep copy sheets to preserve them
-    for (const sheetName of workbook.SheetNames) {
-        // A simple structuredClone would be ideal, but to avoid issues with complex objects from xlsx,
-        // we can re-parse the sheet which is a safe way to clone.
-        const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-        newWorkbook.Sheets[sheetName] = XLSX.utils.json_to_sheet(sheetData);
+    const ws = newWorkbook.Sheets[activeSheetName];
+    if (!ws) {
+        toast({
+          variant: "destructive",
+          title: "Sheet Error",
+          description: `Could not find sheet "${activeSheetName}" in the workbook.`
+        });
+        return;
+    }
+    
+    // Find the next available column for "Checked-In At"
+    const headerAddress = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1').s; // Start of the sheet
+    let checkInColIndex = 0;
+    while(true) {
+        const cellAddress = XLSX.utils.encode_cell({c: checkInColIndex, r: headerAddress.r});
+        if (!ws[cellAddress]) break;
+        checkInColIndex++;
     }
 
-    const dataToExport = rows.map(row => {
-        const newRow: Record<string, any> = {};
-        headers.forEach(header => {
-            newRow[header] = row[header] ?? '';
-        });
-        newRow['Checked-In At'] = row.checkedInTime ? format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss') : 'N/A';
-        return newRow;
-    });
+    // Add the "Checked-In At" header
+    const checkInHeaderAddress = XLSX.utils.encode_cell({c: checkInColIndex, r: headerAddress.r});
+    XLSX.utils.sheet_add_aoa(ws, [["Checked-In At"]], { origin: checkInHeaderAddress });
 
-    const newWorksheet = XLSX.utils.json_to_sheet(dataToExport);
+    // Iterate through checked-in rows and update the sheet
+    rows.forEach((row, rowIndex) => {
+        if (row.checkedInTime) {
+            const cellAddress = XLSX.utils.encode_cell({c: checkInColIndex, r: rowIndex + 1 + headerAddress.r }); // +1 for header row
+            const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
+            XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
+        }
+    });
     
-    // Replace the old sheet with the new one in the new workbook
-    newWorkbook.Sheets[activeSheetName] = newWorksheet;
-    
+    // Update the sheet's range to include the new column
+    const range = XLSX.utils.decode_range(ws['!ref']!);
+    if (range.e.c < checkInColIndex) {
+        range.e.c = checkInColIndex;
+    }
+    ws['!ref'] = XLSX.utils.encode_range(range);
+
     try {
         const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
         const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
