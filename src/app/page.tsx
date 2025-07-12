@@ -38,6 +38,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
 import {
   TicketCheck,
   Upload,
@@ -48,6 +49,7 @@ import {
   Camera,
   FileSpreadsheet,
   CheckCircle,
+  Archive,
   LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -99,6 +101,8 @@ export default function DashboardPage() {
   const [qrCodeColumn, setQrCodeColumn] = React.useState<string>('');
   const [qrModalOpen, setQrModalOpen] = React.useState(false);
   const [qrModalData, setQrModalData] = React.useState<string>('');
+  const [isGeneratingTickets, setIsGeneratingTickets] = React.useState(false);
+  const [ticketProgress, setTicketProgress] = React.useState({ current: 0, total: 0 });
   
   // Google Sheets integration - single instance
   const googleSheetsApi = useGoogleSheetsApi();
@@ -328,6 +332,92 @@ export default function DashboardPage() {
     if (qrCodeColumn && row[qrCodeColumn]) {
       setQrModalData(String(row[qrCodeColumn]));
       setQrModalOpen(true);
+    }
+  };
+
+  const handleDownloadSelectedTickets = async () => {
+    if (!qrCodeColumn || selectedRows.size === 0 || isGeneratingTickets) return;
+
+    setIsGeneratingTickets(true);
+    setTicketProgress({ current: 0, total: selectedRows.size });
+
+    const sessionId = Date.now().toString();
+
+    // Start progress tracking
+    const progressInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/generate-tickets-progress?sessionId=${sessionId}`);
+        if (response.ok) {
+          const progress = await response.json();
+          setTicketProgress({ current: progress.current, total: progress.total });
+          
+          if (progress.completed) {
+            clearInterval(progressInterval);
+          }
+        }
+      } catch (error) {
+        console.error('Progress tracking error:', error);
+      }
+    }, 500);
+
+    try {
+      const selectedData = Array.from(selectedRows).map(index => {
+        const row = rows[index];
+        return {
+          qrData: String(row[qrCodeColumn]),
+          rowNumber: (index + 1).toString().padStart(4, '0')
+        };
+      });
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
+      const response = await fetch('/api/generate-tickets-zip-jszip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickets: selectedData, sessionId }),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const blob = await response.blob();
+        console.log('Received blob size:', blob.size);
+        
+        if (blob.size > 0) {
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `tickets-${Date.now()}.zip`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+
+          toast({
+            title: "Success!",
+            description: `Downloaded ${selectedRows.size} tickets as ZIP file`,
+          });
+        } else {
+          throw new Error('Empty ZIP file received');
+        }
+      } else {
+        const errorText = await response.text();
+        console.error('API Error:', errorText);
+        throw new Error(`Failed to generate tickets: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to download tickets",
+        variant: "destructive",
+      });
+    } finally {
+      clearInterval(progressInterval);
+      setIsGeneratingTickets(false);
+      setTicketProgress({ current: 0, total: 0 });
     }
   };
 
@@ -838,6 +928,33 @@ export default function DashboardPage() {
                             ))}
                           </SelectContent>
                         </Select>
+                        
+                        {selectedRows.size > 0 && qrCodeColumn && (
+                          <div className="ml-4 flex flex-col gap-2">
+                            <Button
+                              onClick={handleDownloadSelectedTickets}
+                              variant="outline"
+                              disabled={isGeneratingTickets}
+                            >
+                              <Archive className="mr-2 h-4 w-4" />
+                              {isGeneratingTickets 
+                                ? `Generating... (${ticketProgress.current}/${ticketProgress.total})`
+                                : `Download Selected Tickets (${selectedRows.size})`
+                              }
+                            </Button>
+                            {isGeneratingTickets && (
+                              <div className="w-[250px]">
+                                <Progress 
+                                  value={ticketProgress.total > 0 ? (ticketProgress.current / ticketProgress.total) * 100 : 0} 
+                                  className="h-2"
+                                />
+                                <div className="text-xs text-muted-foreground mt-1 text-center">
+                                  {ticketProgress.current} / {ticketProgress.total} tickets processed
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
