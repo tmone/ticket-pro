@@ -168,7 +168,7 @@ export default function DashboardPage() {
         setDialogState('duplicate');
         setIsAlertOpen(true);
       } else {
-        const updatedRow = { ...foundRowData, checkedInTime: new Date() };
+        const updatedRow = { ...foundRowData, checkedInTime: new Date(), __rowNum__: foundRowData.__rowNum__ };
         const updatedRows = [...rows];
         updatedRows[foundRowIndex] = updatedRow;
         setRows(updatedRows);
@@ -290,8 +290,9 @@ export default function DashboardPage() {
     });
     const extractedHeaders = Array.from(headerSet);
 
-    const processedRows = jsonData.map((row) => ({
+    const processedRows = jsonData.map((row, index) => ({
       ...row,
+      __rowNum__: index + 2, // Assuming header is row 1, data starts at row 2
       checkedInTime: null,
     }));
 
@@ -390,14 +391,15 @@ export default function DashboardPage() {
         // Create a deep copy of the workbook to avoid direct state mutation.
         // This is a safer way to handle complex objects in React state.
         const newWorkbook: WorkBook = {
-            SheetNames: [...workbook.SheetNames],
+            SheetNames: [],
             Sheets: {}
         };
 
-        for (const sheetName of workbook.SheetNames) {
-            // This creates a shallow copy of the sheet object.
-            // For cell-by-cell modification, this is generally safe.
-             newWorkbook.Sheets[sheetName] = {...workbook.Sheets[sheetName]};
+        for (const name of workbook.SheetNames) {
+            newWorkbook.SheetNames.push(name);
+            newWorkbook.Sheets[name] = {...(workbook.Sheets[name])};
+            // This shallow copy of the sheet is the key. 
+            // We need to avoid deep cloning the cells themselves as it loses properties.
         }
 
         const ws = newWorkbook.Sheets[activeSheetName];
@@ -410,23 +412,30 @@ export default function DashboardPage() {
             return;
         }
         
-        const dataToExport = rows.map(row => {
-            const newRow = {...row};
-            if(row.checkedInTime) {
-                newRow['Checked-In At'] = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
-            } else {
-                newRow['Checked-In At'] = 'N/A';
-            }
-            delete newRow.checkedInTime;
-            return newRow;
-        });
+        // Find the first empty column to add "Checked-In At"
+        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+        const checkInColIndex = range.e.c + 1;
+        const checkInColName = XLSX.utils.encode_col(checkInColIndex);
+        
+        // Add header for the new column
+        const headerAddress = `${checkInColName}1`;
+        XLSX.utils.sheet_add_aoa(ws, [['Checked-In At']], { origin: headerAddress });
 
-        const newWs = XLSX.utils.json_to_sheet(dataToExport);
+        // Iterate through checked-in rows and update the sheet
+        rows.forEach(row => {
+            if (row.checkedInTime && row.__rowNum__) {
+                const cellAddress = `${checkInColName}${row.__rowNum__}`;
+                const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
+                XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
+            }
+        });
         
-        // Replace the old sheet with the new one in our copied workbook
-        newWorkbook.Sheets[activeSheetName] = newWs;
+        // Update the sheet's range to include the new column
+        const newRange = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+        newRange.e.c = Math.max(newRange.e.c, checkInColIndex);
+        ws['!ref'] = XLSX.utils.encode_range(newRange);
         
-        const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
+        const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
         const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
 
         const link = document.createElement('a');
@@ -733,5 +742,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
