@@ -37,7 +37,11 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
   }
 
   try {
-    const oauth2Client = new google.auth.OAuth2();
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
     oauth2Client.setCredentials(session.tokens);
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
@@ -65,7 +69,7 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
 
     const values = response.data.values;
     if (!values || values.length === 0) {
-      return { error: 'The Google Sheet appears to be empty or could not be read.' };
+      return { data: [] }; // Return empty data instead of error for empty sheets
     }
 
     const jsonData = toJsonObject(values);
@@ -74,10 +78,13 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
     console.error('Error fetching Google Sheet:', error);
     // Provide a more user-friendly error message for common issues
     if (error.code === 403) {
-      return { error: 'Permission Denied (403). Make sure you have access to this Google Sheet and have granted the necessary permissions.' };
+      return { error: 'Permission Denied (403). Make sure you have access to this Google Sheet and have granted the necessary permissions. You may need to log out and log back in.' };
     }
     if (error.code === 404) {
       return { error: `Not Found (404). The Google Sheet could not be found. Make sure the URL is correct.` };
+    }
+    if (error.code === 401) {
+        return { error: `Authentication failed (401). Your session may have expired. Please log out and sign in again.` };
     }
     return { error: error.message || 'An unknown error occurred while fetching the sheet.' };
   }
@@ -87,7 +94,7 @@ export async function getSession(): Promise<SessionData> {
   const session = await getIronSession<SessionData>(cookies(), sessionOptions);
   // Return a plain object to avoid non-serializable data issues in Client Components
   return {
-    isLoggedIn: session.isLoggedIn,
+    isLoggedIn: !!session.isLoggedIn,
     name: session.name,
     email: session.email,
     picture: session.picture,
