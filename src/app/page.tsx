@@ -166,7 +166,6 @@ export default function DashboardPage() {
       
       if (result.error) {
         // If the error is about authentication, redirect to login to get permissions.
-        // This is the key change to fix the 403 issue.
         if (result.error.includes('Authentication required')) {
           router.push('/api/auth/login/google');
           return; // Stop execution here
@@ -603,3 +602,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
