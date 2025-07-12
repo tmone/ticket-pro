@@ -38,8 +38,11 @@ import {
   AlertTriangle,
   Camera,
   RefreshCw,
+  User,
 } from "lucide-react";
-import { fetchGoogleSheetData } from "./actions";
+import { fetchGoogleSheetData, getSession, logout } from "./actions";
+import type { SessionData } from "@/lib/session";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const checkInSchema = z.object({
   uniqueCode: z.string().min(1, { message: "Code is required." }),
@@ -57,7 +60,7 @@ export default function DashboardPage() {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
-  const [isAuthenticated, setIsAuthenticated] = React.useState(false);
+  const [session, setSession] = React.useState<SessionData | null>(null);
   const [headers, setHeaders] = React.useState<string[]>([]);
   const [rows, setRows] = React.useState<Record<string, any>[]>([]);
   const [scannedRow, setScannedRow] = React.useState<Record<string, any> | null | undefined>(null);
@@ -79,6 +82,16 @@ export default function DashboardPage() {
     resolver: zodResolver(sheetUrlSchema),
     defaultValues: { url: "" },
   });
+
+  React.useEffect(() => {
+    getSession().then((sessionData) => {
+      if (!sessionData.isLoggedIn) {
+        router.push("/login");
+      } else {
+        setSession(sessionData);
+      }
+    });
+  }, [router]);
   
   const stopScan = React.useCallback(() => {
     setIsScanning(false);
@@ -106,21 +119,14 @@ export default function DashboardPage() {
   }, []);
 
   React.useEffect(() => {
-    const authStatus = sessionStorage.getItem("isAuthenticated");
-    if (authStatus !== "true") {
-      router.push("/login");
-    } else {
-      setIsAuthenticated(true);
-    }
-    
     // Cleanup camera on component unmount
     return () => {
       stopScan();
     };
-  }, [router, stopScan]);
+  }, [stopScan]);
 
-  const handleLogout = () => {
-    sessionStorage.removeItem("isAuthenticated");
+  const handleLogout = async () => {
+    await logout();
     router.push("/login");
   };
 
@@ -322,7 +328,7 @@ export default function DashboardPage() {
   }, [isAlertOpen, dialogState, isContinuous, startScan, checkInForm]);
 
 
-  if (!isAuthenticated) {
+  if (!session?.isLoggedIn) {
     return <div className="flex h-screen w-full items-center justify-center">Loading...</div>;
   }
   
@@ -333,13 +339,23 @@ export default function DashboardPage() {
             <TicketCheck className="h-6 w-6 text-primary" />
             <h1 className="text-xl font-bold">TicketCheck Pro</h1>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-4">
+             {session?.picture && (
+                <div className="flex items-center gap-2 text-sm font-medium">
+                    <Avatar className="h-8 w-8">
+                        <AvatarImage src={session.picture} alt={session.name} />
+                        <AvatarFallback><User className="h-4 w-4" /></AvatarFallback>
+                    </Avatar>
+                    <span className="hidden sm:inline">{session.name}</span>
+                </div>
+            )}
             <Button onClick={handleExport} variant="outline" size="sm">
                 <Download className="mr-2 h-4 w-4"/>
                 Export Report
             </Button>
             <Button onClick={handleLogout} variant="ghost" size="icon">
                 <LogOut className="h-5 w-5" />
+                <span className="sr-only">Log out</span>
             </Button>
         </div>
       </header>
@@ -350,7 +366,7 @@ export default function DashboardPage() {
               <CardHeader>
                 <CardTitle>Google Sheet Data</CardTitle>
                 <CardDescription>
-                    Paste the URL of a public Google Sheet. Make sure it's shared with "Anyone with the link".
+                    Paste the URL of a Google Sheet you have access to.
                 </CardDescription>
               </CardHeader>
               <CardContent>
