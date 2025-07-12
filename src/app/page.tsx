@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -240,9 +241,10 @@ export default function DashboardPage() {
     try {
       const url = new URL(searchCode);
       const params = url.searchParams;
-      const potentialCode = params.get('id') || params.get('code') || params.values().next().value;
-      if (potentialCode) {
-        searchCode = potentialCode.trim();
+      // Get the value of the first query parameter
+      const firstParamValue = params.values().next().value;
+      if (firstParamValue) {
+        searchCode = firstParamValue.trim();
       }
     } catch (e) {
       // Not a valid URL, search with the code as-is.
@@ -251,15 +253,14 @@ export default function DashboardPage() {
     const lowerCaseSearchCode = searchCode.toLowerCase();
 
     const rowIndex = rows.findIndex(row =>
+        // Iterate only over the visible headers
         headers.some(header => {
             const cellValue = row[header];
             if (cellValue === undefined || cellValue === null) {
                 return false;
             }
-            const lowerCaseCellValue = String(cellValue).trim().toLowerCase();
-            
-            // Match if the cell value equals the search code OR if the cell value contains the search code.
-            return lowerCaseCellValue === lowerCaseSearchCode || lowerCaseCellValue.includes(lowerCaseSearchCode);
+            // Perform an exact, case-insensitive match
+            return String(cellValue).trim().toLowerCase() === lowerCaseSearchCode;
         })
     );
 
