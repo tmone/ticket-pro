@@ -391,9 +391,8 @@ export default function DashboardPage() {
     }
 
     try {
-        // IMPORTANT: Work directly on the workbook object from state.
-        // DO NOT create a deep copy using JSON.stringify, as it destroys formatting.
-        const ws = workbook.Sheets[activeSheetName];
+        const newWorkbook = JSON.parse(JSON.stringify(workbook));
+        const ws = newWorkbook.Sheets[activeSheetName];
         if (!ws) {
             toast({
               variant: "destructive",
@@ -402,37 +401,22 @@ export default function DashboardPage() {
             });
             return;
         }
-        
-        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
-        const headerRowIndex = range.s.r;
-        const checkInColIndex = range.e.c + 1; // Add new column after the last existing one
 
-        // Add the "Checked-In At" header
-        const headerCellAddress = XLSX.utils.encode_cell({ c: checkInColIndex, r: headerRowIndex });
-        XLSX.utils.sheet_add_aoa(ws, [["Checked-In At"]], { origin: headerCellAddress });
-
-        // Iterate through checked-in rows and update the sheet cell by cell
-        rows.forEach((row, rowIndex) => {
-            if (row.checkedInTime) {
-                // +1 to account for the header row in Excel sheet
-                const excelRowIndex = rowIndex + 1 + headerRowIndex;
-                const cellAddress = XLSX.utils.encode_cell({ c: checkInColIndex, r: excelRowIndex });
-                const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
-                
-                // Add the value to the specific cell, preserving original cell objects
-                 XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
+        const dataToExport = rows.map(row => {
+            const newRow = {...row};
+            if(row.checkedInTime) {
+                newRow['Checked-In At'] = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
+            } else {
+                newRow['Checked-In At'] = 'N/A';
             }
+            delete newRow.checkedInTime;
+            return newRow;
         });
+
+        const newWs = XLSX.utils.json_to_sheet(dataToExport);
+        newWorkbook.Sheets[activeSheetName] = newWs;
         
-        // Update the sheet's range to include the new column
-        const newRange = XLSX.utils.decode_range(ws['!ref']!);
-        if (newRange.e.c < checkInColIndex) {
-            newRange.e.c = checkInColIndex;
-        }
-        ws['!ref'] = XLSX.utils.encode_range(newRange);
-        
-        // Write the modified workbook object directly
-        const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
+        const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
         const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
 
         const link = document.createElement('a');
@@ -738,5 +722,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
