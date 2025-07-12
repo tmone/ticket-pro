@@ -182,7 +182,7 @@ export default function DashboardPage() {
       setIsAlertOpen(true);
     }
   }, [rows, headers, isScanning, stopScan]);
-
+  
   const tick = React.useCallback(() => {
     if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
         const video = videoRef.current;
@@ -259,9 +259,6 @@ export default function DashboardPage() {
   }, [isAlertOpen, dialogState, isContinuous, handleAlertClose]);
 
   const processSheetData = (wb: WorkBook, sheetName: string) => {
-    rowRefs.current = [];
-    setHighlightedRowIndex(null);
-
     const worksheet = wb.Sheets[sheetName];
     if (!worksheet) {
         toast({
@@ -295,18 +292,18 @@ export default function DashboardPage() {
     });
     const extractedHeaders = Array.from(headerSet);
 
-    const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
-
     setHeaders(extractedHeaders);
-    setRows(initialRows);
+    setRows(jsonData.map(row => ({...row, checkedInTime: null})));
+    
     setScannedRow(null);
+    rowRefs.current = [];
+    setHighlightedRowIndex(null);
 
     toast({
       title: "Success!",
       description: `Successfully imported ${jsonData.length} rows and ${extractedHeaders.length} columns from sheet: ${sheetName}.`,
     });
   };
-
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -335,7 +332,7 @@ export default function DashboardPage() {
         } else if (names.length === 1) {
             processSheetData(wb, names[0]);
         } else {
-            setIsSheetSelectorOpen(true); // Open modal to select a sheet
+            setIsSheetSelectorOpen(true);
         }
         
       } catch (error) {
