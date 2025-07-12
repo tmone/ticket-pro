@@ -178,7 +178,6 @@ export default function DashboardPage() {
     }
   }, [rows, headers, isScanning, stopScan]);
 
-
   const tick = React.useCallback(() => {
     if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
         const video = videoRef.current;
@@ -226,6 +225,7 @@ export default function DashboardPage() {
   const handleAlertClose = React.useCallback(() => {
     setIsAlertOpen(false);
     checkInForm.reset();
+    const uniqueCode = checkInForm.getValues("uniqueCode");
     
     if (isContinuous && scanSourceRef.current === 'camera') {
       if (uniqueCode === lastCheckedInCode && dialogState === 'duplicate') {
@@ -236,7 +236,6 @@ export default function DashboardPage() {
     } else if (isContinuous && scanSourceRef.current === 'form') {
       inputRef.current?.focus();
     }
-    const uniqueCode = checkInForm.getValues("uniqueCode");
   }, [isContinuous, checkInForm, startScan, lastCheckedInCode, dialogState]);
 
   React.useEffect(() => {
@@ -245,7 +244,19 @@ export default function DashboardPage() {
     };
   }, [stopScan]);
 
+  React.useEffect(() => {
+      if (isContinuous && dialogState === 'success' && isAlertOpen) {
+          const timer = setTimeout(() => {
+              handleAlertClose();
+          }, 1500); 
+          return () => clearTimeout(timer);
+      }
+  }, [isAlertOpen, dialogState, isContinuous, handleAlertClose]);
+
   const processSheetData = (wb: WorkBook, sheetName: string) => {
+    rowRefs.current = [];
+    setHighlightedRowIndex(null);
+    
     const worksheet = wb.Sheets[sheetName];
     if (!worksheet) {
         toast({
@@ -269,7 +280,6 @@ export default function DashboardPage() {
       return;
     }
     
-    // Iterate over all rows to find all possible headers
     const headerSet = new Set<string>();
     jsonData.forEach(row => {
       Object.keys(row).forEach(key => {
@@ -286,8 +296,6 @@ export default function DashboardPage() {
     setRows(initialRows);
     setScannedRow(null);
     setSelectedSheet(sheetName);
-    setHighlightedRowIndex(null);
-    rowRefs.current = [];
 
     toast({
       title: "Success!",
@@ -393,15 +401,6 @@ export default function DashboardPage() {
         description: "The attendee report has been downloaded."
     });
   };
-
-  React.useEffect(() => {
-      if (isContinuous && dialogState === 'success' && isAlertOpen) {
-          const timer = setTimeout(() => {
-              handleAlertClose();
-          }, 1500); 
-          return () => clearTimeout(timer);
-      }
-  }, [isAlertOpen, dialogState, isContinuous, handleAlertClose]);
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
