@@ -315,7 +315,13 @@ export default function DashboardPage() {
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: "array", cellStyles: true });
+        const wb = XLSX.read(data, {
+            type: "array",
+            cellStyles: true,
+            cellFormulas: true,
+            cellDates: true,
+            cellNF: true,
+        });
         const names = wb.SheetNames;
         
         setWorkbook(wb);
@@ -388,8 +394,6 @@ export default function DashboardPage() {
     }
 
     try {
-        // IMPORTANT: Work on the original workbook object to preserve styles.
-        // Direct mutation is safe here as we are preparing for a download, not re-rendering state.
         const ws = workbook.Sheets[activeSheetName];
         if (!ws) {
             toast({
@@ -400,40 +404,46 @@ export default function DashboardPage() {
             return;
         }
         
-        // Find the first empty column to add "Checked-In At"
         const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
         const checkInColIndex = range.e.c + 1;
         const checkInColName = XLSX.utils.encode_col(checkInColIndex);
         
-        // Add header for the new column
         const headerAddress = `${checkInColName}1`;
-        XLSX.utils.sheet_add_aoa(ws, [['Checked-In At']], { origin: headerAddress });
+        const headerCellRef = ws[headerAddress];
+        ws[headerAddress] = {
+            v: 'Checked-In At',
+            t: 's',
+            ...(headerCellRef?.s && { s: headerCellRef.s }),
+            ...(headerCellRef?.z && { z: headerCellRef.z }),
+        };
 
-        // Iterate through checked-in rows and update the sheet cell by cell
         rows.forEach(row => {
             if (row.checkedInTime && row.__rowNum__) {
                 const cellAddress = `${checkInColName}${row.__rowNum__}`;
                 const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
-                
-                // This is the key part: create a new cell object preserving the old style
-                const existingCell = ws[cellAddress] || {};
-                const newCell: CellObject = {
+                const existingCell = ws[cellAddress];
+
+                ws[cellAddress] = {
                     v: cellValue,
-                    t: 's', // Set type to string
-                    ...(existingCell.s && { s: existingCell.s }) // Preserve existing style
+                    t: 's',
+                    ...(existingCell?.s && { s: existingCell.s }),
+                    ...(existingCell?.z && { z: existingCell.z }),
                 };
-                ws[cellAddress] = newCell;
             }
         });
         
-        // Update the sheet's range to include the new column
         if (ws['!ref']) {
             const newRange = XLSX.utils.decode_range(ws['!ref']);
             newRange.e.c = Math.max(newRange.e.c, checkInColIndex);
             ws['!ref'] = XLSX.utils.encode_range(newRange);
         }
         
-        const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
+        const excelBuffer = XLSX.write(workbook, { 
+            bookType: 'xlsx', 
+            type: 'array', 
+            cellStyles: true,
+            bookVBA: true,
+        });
         const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
 
         const link = document.createElement('a');
@@ -740,4 +750,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
