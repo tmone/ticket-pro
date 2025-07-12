@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
-import type { WorkBook, WorkSheet, CellObject, ExcelDataType } from "xlsx";
+import type { WorkBook, WorkSheet, CellObject } from "xlsx";
 import jsqr from "jsqr";
 
 import { Button } from "@/components/ui/button";
@@ -48,131 +48,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Helper functions for Excel formatting preservation
-const deepCopyWorkbook = (workbook: WorkBook): WorkBook => {
-  const newWorkbook = XLSX.utils.book_new();
-  
-  try {
-    // Copy all sheets with complete formatting
-    Object.keys(workbook.Sheets).forEach(sheetName => {
-      const originalSheet = workbook.Sheets[sheetName];
-      const newSheet: WorkSheet = {};
-      
-      if (!originalSheet) return;
-      
-      // Copy all cells and sheet properties
-      Object.keys(originalSheet).forEach(key => {
-        try {
-          if (key.startsWith('!')) {
-            // Copy sheet properties (merges, cols, rows, etc.)
-            const prop = originalSheet[key];
-            if (Array.isArray(prop)) {
-              newSheet[key] = [...prop];
-            } else if (prop && typeof prop === 'object') {
-              newSheet[key] = { ...prop };
-            } else {
-              newSheet[key] = prop;
-            }
-          } else {
-            // Copy cell with all formatting properties
-            const cell = originalSheet[key];
-            if (cell && typeof cell === 'object') {
-              newSheet[key] = { ...cell };
-            }
-          }
-        } catch (error) {
-          console.warn(`Error copying cell ${key}:`, error);
-        }
-      });
-      
-      newWorkbook.Sheets[sheetName] = newSheet;
-    });
-    
-    // Copy workbook metadata safely
-    newWorkbook.SheetNames = [...workbook.SheetNames];
-    if (workbook.Props) newWorkbook.Props = { ...workbook.Props };
-    if (workbook.Custprops) newWorkbook.Custprops = { ...workbook.Custprops };
-    if (workbook.Workbook) newWorkbook.Workbook = { ...workbook.Workbook };
-    if (workbook.vbaraw) newWorkbook.vbaraw = workbook.vbaraw;
-  } catch (error) {
-    console.error('Error in deepCopyWorkbook:', error);
-    // Fallback: return original workbook if copy fails
-    return workbook;
-  }
-  
-  return newWorkbook;
-};
-
-const detectFileFormatting = (workbook: WorkBook): boolean => {
-  try {
-    if (!workbook || !workbook.SheetNames) {
-      return false;
-    }
-
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName];
-      
-      if (!sheet || typeof sheet !== 'object') continue;
-      
-      // Check for formatting indicators
-      if (sheet['!cols'] || sheet['!rows'] || sheet['!merges']) {
-        return true;
-      }
-      
-      // Check cells for styles - only check actual cell addresses (like A1, B2, etc.)
-      try {
-        for (const cellAddress of Object.keys(sheet)) {
-          if (!cellAddress.startsWith('!')) {
-            try {
-              const cell = sheet[cellAddress];
-              // Safely check if cell exists and has formatting properties
-              if (cell && typeof cell === 'object' && 
-                  cell !== null && 
-                  !Array.isArray(cell) &&
-                  (cell.hasOwnProperty('s') || cell.hasOwnProperty('z'))) {
-                return true;
-              }
-            } catch (cellError) {
-              console.warn(`Error checking cell ${cellAddress}:`, cellError);
-              continue;
-            }
-          }
-        }
-      } catch (sheetError) {
-        console.warn(`Error checking sheet ${sheetName}:`, sheetError);
-        continue;
-      }
-    }
-  } catch (error) {
-    console.warn('Error detecting file formatting:', error);
-    // If we can't detect formatting, assume it has some
-    return true;
-  }
-  return false;
-};
-
-const preserveCellFormatting = (sourceCell: CellObject | undefined, newValue: any, cellType: ExcelDataType = 's') => {
-  const newCell: CellObject = {
-    v: newValue,
-    t: cellType,
-  };
-  
-  if (sourceCell && typeof sourceCell === 'object') {
-    try {
-      // Preserve all formatting properties safely
-      if (sourceCell.s) newCell.s = sourceCell.s; // Style
-      if (sourceCell.z) newCell.z = sourceCell.z; // Number format
-      if (sourceCell.l) newCell.l = sourceCell.l; // Hyperlink
-      if (sourceCell.c) newCell.c = sourceCell.c; // Comments
-      if (sourceCell.w) newCell.w = sourceCell.w; // Formatted text
-    } catch (error) {
-      console.warn('Error preserving cell formatting:', error);
-    }
-  }
-  
-  return newCell;
-};
-
 const checkInSchema = z.object({
   uniqueCode: z.string().min(1, { message: "Code is required." }),
 });
@@ -200,11 +75,11 @@ export default function DashboardPage() {
   const [isContinuous, setIsContinuous] = React.useState(false);
 
   const [workbook, setWorkbook] = React.useState<WorkBook | null>(null);
+  const [originalFileData, setOriginalFileData] = React.useState<Uint8Array | null>(null);
   const [sheetNames, setSheetNames] = React.useState<string[]>([]);
   const [activeSheetName, setActiveSheetName] = React.useState<string | null>(null);
   const [isSheetSelectorOpen, setIsSheetSelectorOpen] = React.useState(false);
   const [highlightedRowIndex, setHighlightedRowIndex] = React.useState<number | null>(null);
-  const [uploadedFileName, setUploadedFileName] = React.useState<string | null>(null);
   const [uploadedFileInfo, setUploadedFileInfo] = React.useState<{
     name: string;
     size: string;
@@ -491,28 +366,28 @@ export default function DashboardPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Set file info for display
     setUploadedFileInfo({
       name: file.name,
       size: (file.size / 1024).toFixed(1) + ' KB',
       type: file.name.split('.').pop()?.toUpperCase() || 'Unknown',
-      hasFormatting: true // Will be updated after reading
+      hasFormatting: false, 
     });
 
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        
+        // Save raw file data for pristine re-reads during export
+        setOriginalFileData(data);
+
         const wb = XLSX.read(data, {
             type: "array",
             cellStyles: true,
+            cellFormulas: true,
             cellDates: true,
+            cellNF: true,
             bookVBA: true,
-            bookSheets: true,
-            bookProps: true,
-            sheetStubs: true,
-            sheetRows: 0, // Read all rows
-            dense: false,
         });
         const names = wb.SheetNames;
         
@@ -525,19 +400,11 @@ export default function DashboardPage() {
         setHighlightedRowIndex(null);
         rowRefs.current = [];
 
-        // Update file info with actual formatting detection
-        try {
-          setUploadedFileInfo(prev => prev ? {
-            ...prev,
-            hasFormatting: detectFileFormatting(wb)
-          } : null);
-        } catch (error) {
-          console.warn('Error detecting formatting, assuming file has formatting:', error);
-          setUploadedFileInfo(prev => prev ? {
-            ...prev,
-            hasFormatting: true
-          } : null);
-        }
+        // Simple formatting check
+        setUploadedFileInfo(prev => prev ? {
+          ...prev,
+          hasFormatting: wb.Workbook?.Styles?.fonts?.length > 1,
+        } : null);
 
         if (names.length === 0) {
             toast({
@@ -593,21 +460,27 @@ export default function DashboardPage() {
   };
 
   const handleExport = () => {
-    if (!workbook || !activeSheetName) {
+    if (!originalFileData || !activeSheetName) {
         toast({
             variant: "destructive",
-            title: "No Workbook Found",
+            title: "No Data Found",
             description: "Please upload an Excel file first."
         });
         return;
     }
 
     try {
-        // Create a deep copy of the workbook to preserve all original formatting
-        const workbookCopy = deepCopyWorkbook(workbook);
+        // Re-read the workbook from original data to ensure it's pristine
+        const currentWorkbook = XLSX.read(originalFileData, {
+            type: "array",
+            cellStyles: true,
+            cellFormulas: true,
+            cellDates: true,
+            cellNF: true,
+            bookVBA: true,
+        });
 
-        // Work with the copied worksheet
-        const ws = workbookCopy.Sheets[activeSheetName];
+        const ws = currentWorkbook.Sheets[activeSheetName];
         if (!ws) {
             toast({
               variant: "destructive",
@@ -621,38 +494,26 @@ export default function DashboardPage() {
         const checkInColIndex = range.e.c + 1;
         const checkInColName = XLSX.utils.encode_col(checkInColIndex);
         
-        // Add header with proper formatting (copy style from adjacent header)
+        // Add header
         const headerAddress = `${checkInColName}1`;
-        const adjacentHeaderAddress = range.e.c > 0 ? `${XLSX.utils.encode_col(range.e.c)}1` : 'A1';
-        const adjacentHeaderCell = ws[adjacentHeaderAddress];
+        XLSX.utils.sheet_add_aoa(ws, [['Checked-In At']], { origin: headerAddress });
         
-        try {
-          ws[headerAddress] = preserveCellFormatting(adjacentHeaderCell, 'Checked-In At', 's');
-        } catch (error) {
-          console.warn('Error setting header formatting:', error);
-          ws[headerAddress] = { v: 'Checked-In At', t: 's' };
-        }
-
         // Update data cells while preserving row formatting
         rows.forEach(row => {
             if (row.checkedInTime && row.__rowNum__) {
                 const cellAddress = `${checkInColName}${row.__rowNum__}`;
                 const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
                 
-                // Get formatting template from adjacent cell in the same row
-                const adjacentCellAddress = range.e.c > 0 ? `${XLSX.utils.encode_col(range.e.c)}${row.__rowNum__}` : `A${row.__rowNum__}`;
-                const adjacentCell = ws[adjacentCellAddress];
+                const existingCell = ws[cellAddress];
                 
-                try {
-                  // Create cell with datetime formatting
-                  const newCell = preserveCellFormatting(adjacentCell, cellValue, 's');
-                  // Add specific datetime format
-                  newCell.z = 'yyyy-mm-dd hh:mm:ss';
-                  ws[cellAddress] = newCell;
-                } catch (error) {
-                  console.warn(`Error formatting cell ${cellAddress}:`, error);
-                  ws[cellAddress] = { v: cellValue, t: 's' };
-                }
+                const newCell: CellObject = {
+                    v: cellValue,
+                    t: 's', // Treat as string
+                    z: 'yyyy-mm-dd hh:mm:ss', // Apply date format string
+                    ...(existingCell?.s && { s: existingCell.s }), // Keep existing style
+                };
+
+                ws[cellAddress] = newCell;
             }
         });
         
@@ -663,32 +524,11 @@ export default function DashboardPage() {
             ws['!ref'] = XLSX.utils.encode_range(newRange);
         }
         
-        // Preserve and extend column widths
-        if (workbook.Sheets[activeSheetName]['!cols']) {
-            ws['!cols'] = [...workbook.Sheets[activeSheetName]['!cols']];
-            // Add reasonable width for new datetime column
-            if (!ws['!cols'][checkInColIndex]) {
-                ws['!cols'][checkInColIndex] = { width: 20 };
-            }
-        } else {
-            // Create column widths array if it doesn't exist
-            ws['!cols'] = [];
-            ws['!cols'][checkInColIndex] = { width: 20 };
-        }
-        
-        // Preserve row heights
-        if (workbook.Sheets[activeSheetName]['!rows']) {
-            ws['!rows'] = [...workbook.Sheets[activeSheetName]['!rows']];
-        }
-        
-        // Write with maximum formatting preservation
-        const excelBuffer = XLSX.write(workbookCopy, { 
+        const excelBuffer = XLSX.write(currentWorkbook, { 
             bookType: 'xlsx', 
             type: 'array', 
             cellStyles: true,
-            cellDates: true,
             bookVBA: true,
-            compression: true,
         });
         const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
 
@@ -1045,4 +885,3 @@ export default function DashboardPage() {
   );
 }
 
-    
