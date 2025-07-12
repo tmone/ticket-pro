@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -30,38 +29,27 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
   TicketCheck,
-  LogOut,
-  Link,
+  Upload,
   QrCode,
   Download,
   UserCheck,
   AlertTriangle,
   Camera,
-  RefreshCw,
-  User,
 } from "lucide-react";
-import { fetchGoogleSheetData, getSession, logout } from "./actions";
-import type { SessionData } from "@/lib/session";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const checkInSchema = z.object({
   uniqueCode: z.string().min(1, { message: "Code is required." }),
 });
 
-const sheetUrlSchema = z.object({
-    url: z.string().url({ message: "Please enter a valid Google Sheet URL." }),
-});
-
 type DialogState = 'success' | 'duplicate' | 'not_found';
 
 export default function DashboardPage() {
-  const router = useRouter();
   const { toast } = useToast();
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const animationFrameIdRef = React.useRef<number>();
 
-  const [session, setSession] = React.useState<SessionData | null>(null);
   const [headers, setHeaders] = React.useState<string[]>([]);
   const [rows, setRows] = React.useState<Record<string, any>[]>([]);
   const [scannedRow, setScannedRow] = React.useState<Record<string, any> | null | undefined>(null);
@@ -71,22 +59,11 @@ export default function DashboardPage() {
   const [isScanning, setIsScanning] = React.useState(false);
   const [scanError, setScanError] = React.useState<string | null>(null);
   const [isContinuous, setIsContinuous] = React.useState(false);
-  const [googleSheetUrl, setGoogleSheetUrl] = React.useState<string>("");
-  const [isFetching, setIsFetching] = React.useState(false);
 
   const checkInForm = useForm<z.infer<typeof checkInSchema>>({
     resolver: zodResolver(checkInSchema),
     defaultValues: { uniqueCode: "" },
   });
-
-  const sheetUrlForm = useForm<z.infer<typeof sheetUrlSchema>>({
-    resolver: zodResolver(sheetUrlSchema),
-    defaultValues: { url: "" },
-  });
-
-  React.useEffect(() => {
-    getSession().then(setSession);
-  }, []);
 
   const stopScan = React.useCallback(() => {
     setIsScanning(false);
@@ -123,17 +100,12 @@ export default function DashboardPage() {
     };
   }, [stopScan]);
 
-  const handleLogout = async () => {
-    await logout();
-    setSession(null); 
-  };
-
   const processSheetData = (jsonData: Record<string, any>[]) => {
       if (jsonData.length === 0) {
         toast({
             variant: "destructive",
             title: "No Data",
-            description: "The sheet is empty or could not be read."
+            description: "The uploaded file is empty or could not be read."
         });
         setHeaders([]);
         setRows([]);
@@ -155,40 +127,39 @@ export default function DashboardPage() {
       });
   };
 
-  const handleGoogleSheetFetch = async (data: z.infer<typeof sheetUrlSchema>) => {
-    setIsFetching(true);
-    setGoogleSheetUrl(data.url);
-    try {
-      const result = await fetchGoogleSheetData(data.url);
-      
-      if (result.error) {
-        // This is the critical change. We ONLY redirect if the error is specifically
-        // about authentication. Any other error will be displayed in a toast and
-        // the process will stop, preventing the redirect loop.
-        if (result.error.includes('Authentication required')) {
-          router.push('/api/auth/login/google');
-          return; // Stop execution here
-        }
-        // For all other errors, just throw them to be caught by the catch block below.
-        throw new Error(result.error);
-      }
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-      if (result.data) {
-        processSheetData(result.data);
-      }
-    } catch (error: any) {
-        // This block now handles ALL errors except the specific authentication one.
-        // It will show a toast and will NOT redirect.
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet);
+        processSheetData(jsonData);
+      } catch (error) {
+        console.error("Error processing Excel file:", error);
         toast({
           variant: "destructive",
-          title: "An Error Occurred",
-          description: error.message || "Could not fetch or process data. Please check the console for more details.",
+          title: "File Error",
+          description: "Could not process the Excel file. Please ensure it's a valid format.",
         });
-    } finally {
-      setIsFetching(false);
+      }
+    };
+    reader.onerror = () => {
+        toast({
+            variant: "destructive",
+            title: "File Read Error",
+            description: "There was an error reading the file."
+        })
     }
+    reader.readAsArrayBuffer(file);
+    // Reset file input to allow uploading the same file again
+    event.target.value = '';
   };
-
 
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
@@ -344,33 +315,6 @@ export default function DashboardPage() {
             <h1 className="text-xl font-bold">TicketCheck Pro</h1>
         </div>
         <div className="ml-auto flex items-center gap-4">
-             {session?.isLoggedIn ? (
-                <>
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                        <Avatar className="h-8 w-8">
-                            <AvatarImage src={session.picture} alt={session.name || 'User'} />
-                            <AvatarFallback><User className="h-4 w-4" /></AvatarFallback>
-                        </Avatar>
-                        <span className="hidden sm:inline">{session.name}</span>
-                    </div>
-                    <Button onClick={handleLogout} variant="ghost" size="icon">
-                        <LogOut className="h-5 w-5" />
-                        <span className="sr-only">Log out</span>
-                    </Button>
-                </>
-             ) : (
-                <Button asChild variant="outline" size="sm">
-                  <a href="/api/auth/login/google">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="16px" height="16px" className="mr-2">
-                      <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12s5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24s8.955,20,20,20s20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z" />
-                      <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z" />
-                      <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.222,0-9.655-3.373-11.303-8H6.306C9.656,39.663,16.318,44,24,44z" />
-<path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.574l6.19,5.238C39.99,35.596,44,30.162,44,24C44,22.659,43.862,21.35,43.611,20.083z" />
-                    </svg>
-                    Sign in with Google
-                  </a>
-                </Button>
-             )}
             <Button onClick={handleExport} variant="outline" size="sm">
                 <Download className="mr-2 h-4 w-4"/>
                 Export Report
@@ -382,33 +326,23 @@ export default function DashboardPage() {
           <div className="grid auto-rows-max items-start gap-4 md:gap-8 lg:col-span-1">
             <Card>
               <CardHeader>
-                <CardTitle>Google Sheet Data</CardTitle>
+                <CardTitle>Upload Attendee List</CardTitle>
                 <CardDescription>
-                    Paste the URL of a Google Sheet you have access to. You may be prompted to sign in.
+                    Select an Excel file (.xlsx, .xls, .csv) to upload your attendee data.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Form {...sheetUrlForm}>
-                    <form onSubmit={sheetUrlForm.handleSubmit(handleGoogleSheetFetch)} className="space-y-4">
-                        <FormField
-                            control={sheetUrlForm.control}
-                            name="url"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Sheet URL</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="https://docs.google.com/spreadsheets/d/..." {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <Button type="submit" className="w-full" disabled={isFetching}>
-                           {isFetching ? <RefreshCw className="mr-2 h-4 w-4 animate-spin"/> : <Link className="mr-2 h-4 w-4" />}
-                           {isFetching ? 'Fetching Data...' : 'Load Data from Sheet'}
-                        </Button>
-                    </form>
-                </Form>
+                <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    className="hidden"
+                    accept=".xlsx, .xls, .csv"
+                />
+                <Button onClick={() => fileInputRef.current?.click()} className="w-full">
+                    <Upload className="mr-2 h-4 w-4" />
+                    Upload Excel File
+                </Button>
               </CardContent>
             </Card>
             <Card>
@@ -484,8 +418,8 @@ export default function DashboardPage() {
           <div className="lg:col-span-1 xl:col-span-2">
             <Card>
               <CardHeader>
-                  <CardTitle>Data List</CardTitle>
-                  <CardDescription>A list of all imported rows and their check-in status.</CardDescription>
+                  <CardTitle>Attendee List</CardTitle>
+                  <CardDescription>A list of all imported attendees and their check-in status.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="max-h-[600px] overflow-auto">
@@ -519,7 +453,7 @@ export default function DashboardPage() {
                             ) : (
                                 <TableRow>
                                     <TableCell colSpan={headers.length > 0 ? headers.length + 2 : 1} className="h-24 text-center">
-                                        No data loaded yet. Please provide a Google Sheet URL.
+                                        No data loaded. Please upload an Excel file.
                                     </TableCell>
                                 </TableRow>
                             )}
