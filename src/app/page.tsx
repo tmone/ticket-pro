@@ -57,6 +57,7 @@ export default function DashboardPage() {
   const animationFrameIdRef = React.useRef<number>();
   const scanSourceRef = React.useRef<'camera' | 'form' | null>(null);
   const rowRefs = React.useRef<(HTMLTableRowElement | null)[]>([]);
+  const observerRef = React.useRef<IntersectionObserver | null>(null);
 
   const [headers, setHeaders] = React.useState<string[]>([]);
   const [rows, setRows] = React.useState<Record<string, any>[]>([]);
@@ -73,14 +74,14 @@ export default function DashboardPage() {
   const [sheetNames, setSheetNames] = React.useState<string[]>([]);
   const [selectedSheet, setSelectedSheet] = React.useState<string>("");
   const [highlightedRowIndex, setHighlightedRowIndex] = React.useState<number | null>(null);
-
+  const [revealedRows, setRevealedRows] = React.useState<Set<number>>(new Set());
+  
   const checkInForm = useForm<z.infer<typeof checkInSchema>>({
     resolver: zodResolver(checkInSchema),
-    defaultValues: { uniqueCode: "" },
+    defaultValues: {
+      uniqueCode: "",
+    },
   });
-
-  // The order of these functions is important to avoid "cannot access before initialization" errors.
-  // We define dependent functions after their dependencies.
 
   const stopScan = React.useCallback(() => {
     if (animationFrameIdRef.current) {
@@ -94,42 +95,23 @@ export default function DashboardPage() {
       videoRef.current.srcObject = null;
     }
   }, []);
-  
-  const startScan = React.useCallback(async () => {
-    setScanError(null);
-    if (isScanning || animationFrameIdRef.current) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setIsScanning(true);
-        // The `tick` function is defined later, but this is safe because `startScan` is called by user interaction.
-        animationFrameIdRef.current = requestAnimationFrame(tick);
-      }
-    } catch (err) {
-      console.error("Camera access error:", err);
-      setScanError("Camera access denied. Please enable it in your browser settings.");
-      setIsScanning(false);
-    }
-  }, [isScanning]); // `tick` is defined outside and doesn't need to be a dependency
 
-  const restartContinuousScan = React.useCallback(() => {
-      stopScan();
-      setTimeout(() => startScan(), 100);
-  }, [startScan, stopScan]);
-
-
-  let handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
+  const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
     if (!uniqueCode) return;
-
+    
+    // If continuous scanning from camera and the code is a duplicate of the last one, ignore it.
     if (isContinuous && scanSourceRef.current === 'camera' && uniqueCode === lastCheckedInCode) {
-      checkInForm.reset();
-      restartContinuousScan();
-      return; 
+        // Just restart the scan without showing any dialog
+        if (isContinuous && scanSourceRef.current === 'camera') {
+            stopScan();
+            setTimeout(() => startScan(), 100);
+        }
+        return; 
     }
     
+    stopScan(); // Stop scanning as soon as we have a code to process.
+
     let codeToSearch = uniqueCode.trim();
     try {
         const url = new URL(codeToSearch);
@@ -182,6 +164,7 @@ export default function DashboardPage() {
     
     setHighlightedRowIndex(foundRowIndex !== -1 ? foundRowIndex : null);
     if(foundRowIndex !== -1) {
+        setRevealedRows(prev => new Set(prev).add(foundRowIndex));
         rowRefs.current[foundRowIndex]?.scrollIntoView({
             behavior: 'smooth',
             block: 'center'
@@ -209,8 +192,8 @@ export default function DashboardPage() {
       setDialogState('not_found');
       setIsAlertOpen(true);
     }
-  }, [rows, headers, checkInForm, isContinuous, lastCheckedInCode, restartContinuousScan]);
-
+  }, [rows, headers, isContinuous, lastCheckedInCode]);
+  
   const tick = React.useCallback(() => {
     if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
         const video = videoRef.current;
@@ -230,7 +213,6 @@ export default function DashboardPage() {
                   animationFrameIdRef.current = undefined;
                 }
                 scanSourceRef.current = 'camera';
-                stopScan();
                 handleCheckIn({ uniqueCode: code.data });
                 return; 
             }
@@ -240,7 +222,31 @@ export default function DashboardPage() {
         animationFrameIdRef.current = requestAnimationFrame(tick);
     }
   }, [handleCheckIn, isScanning, stopScan]);
+  
+  const startScan = React.useCallback(async () => {
+    setScanError(null);
+    if (isScanning || animationFrameIdRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        // Small delay to allow the stream to start before playing
+        await new Promise(resolve => setTimeout(resolve, 100));
+        await videoRef.current.play();
+        setIsScanning(true);
+        animationFrameIdRef.current = requestAnimationFrame(tick);
+      }
+    } catch (err) {
+      console.error("Camera access error:", err);
+      setScanError("Camera access denied. Please enable it in your browser settings.");
+      setIsScanning(false);
+    }
+  }, [isScanning, tick]);
 
+  const restartContinuousScan = React.useCallback(() => {
+      stopScan();
+      setTimeout(() => startScan(), 100);
+  }, [startScan, stopScan]);
 
   React.useEffect(() => {
     return () => {
@@ -291,6 +297,7 @@ export default function DashboardPage() {
     setScannedRow(null);
     setSelectedSheet(sheetName);
     setHighlightedRowIndex(null);
+    setRevealedRows(new Set());
     rowRefs.current = [];
 
 
@@ -444,6 +451,39 @@ export default function DashboardPage() {
       }
   }, [isAlertOpen, dialogState, isContinuous, handleAlertClose]);
 
+  React.useEffect(() => {
+    if (observerRef.current) observerRef.current.disconnect();
+
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const rowIndex = parseInt(entry.target.getAttribute('data-row-index')!, 10);
+            setRevealedRows(prev => {
+              if (prev.has(rowIndex)) return prev;
+              const newSet = new Set(prev);
+              newSet.add(rowIndex);
+              return newSet;
+            });
+            observerRef.current?.unobserve(entry.target);
+          }
+        });
+      },
+      { rootMargin: '0px', threshold: 0.1 }
+    );
+    
+    const currentObserver = observerRef.current;
+    rowRefs.current.forEach(row => {
+      if (row) currentObserver.observe(row);
+    });
+
+    return () => {
+      if (currentObserver) {
+        currentObserver.disconnect();
+      }
+    };
+  }, [rows]); // Re-run when rows change
+
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
@@ -550,7 +590,7 @@ export default function DashboardPage() {
                         onSubmit={(e) => {
                             e.preventDefault();
                             scanSourceRef.current = 'form';
-                            handleCheckIn({ uniqueCode: checkInForm.getValues("uniqueCode") });
+                            checkInForm.handleSubmit(handleCheckIn)(e);
                         }} 
                         className="space-y-4"
                     >
@@ -605,12 +645,19 @@ export default function DashboardPage() {
                                 rows.map((row, rowIndex) => (
                                     <TableRow 
                                       key={rowIndex}
-                                      ref={(el) => (rowRefs.current[rowIndex] = el)}
+                                      ref={(el) => {
+                                          if (el) rowRefs.current[rowIndex] = el;
+                                      }}
+                                      data-row-index={rowIndex}
                                       className={cn(
                                         highlightedRowIndex === rowIndex && 'bg-primary/10'
                                       )}
                                     >
-                                        {headers.map(header => <TableCell key={header}>{String(row[header] ?? '')}</TableCell>)}
+                                        {headers.map(header => (
+                                            <TableCell key={header}>
+                                                {revealedRows.has(rowIndex) || highlightedRowIndex === rowIndex ? String(row[header] ?? '') : '••••••'}
+                                            </TableCell>
+                                        ))}
                                         <TableCell>
                                             <Badge variant={row.checkedInTime ? "default" : "secondary"} className={row.checkedInTime ? "bg-accent text-accent-foreground" : ""}>
                                                 {row.checkedInTime ? "Checked In" : "Pending"}
@@ -710,3 +757,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
