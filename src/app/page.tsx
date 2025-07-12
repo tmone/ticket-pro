@@ -73,10 +73,10 @@ export default function DashboardPage() {
   const [isScanning, setIsScanning] = React.useState(false);
   const [scanError, setScanError] = React.useState<string | null>(null);
   const [isContinuous, setIsContinuous] = React.useState(false);
-  const [lastCheckedInCode, setLastCheckedInCode] = React.useState<string | null>(null);
 
   const [workbook, setWorkbook] = React.useState<WorkBook | null>(null);
   const [sheetNames, setSheetNames] = React.useState<string[]>([]);
+  const [activeSheetName, setActiveSheetName] = React.useState<string | null>(null);
   const [isSheetSelectorOpen, setIsSheetSelectorOpen] = React.useState(false);
   const [highlightedRowIndex, setHighlightedRowIndex] = React.useState<number | null>(null);
   
@@ -116,7 +116,8 @@ export default function DashboardPage() {
             if (code && code.data) {
               scanSourceRef.current = 'camera';
               checkInForm.setValue('uniqueCode', code.data);
-              handleCheckIn({ uniqueCode: code.data });
+              // Directly call handleCheckIn, it will be wrapped in useCallback later
+              handleCheckIn({ uniqueCode: code.data }); 
               return;
             }
         }
@@ -124,7 +125,7 @@ export default function DashboardPage() {
     if (animationFrameIdRef.current) {
       animationFrameIdRef.current = requestAnimationFrame(tick);
     }
-  }, [checkInForm]);
+  }, [checkInForm]); // Temporarily remove handleCheckIn from deps
 
   const startScan = React.useCallback(async () => {
     setScanError(null);
@@ -144,6 +145,17 @@ export default function DashboardPage() {
       setIsScanning(false);
     }
   }, [isScanning, tick]);
+
+  const handleAlertClose = React.useCallback(() => {
+    setIsAlertOpen(false);
+    checkInForm.reset();
+    
+    if (isContinuous && scanSourceRef.current === 'camera') {
+      setTimeout(() => startScan(), 100); 
+    } else if (isContinuous && scanSourceRef.current === 'form') {
+      inputRef.current?.focus();
+    }
+  }, [isContinuous, checkInForm, startScan]);
 
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
@@ -219,7 +231,6 @@ export default function DashboardPage() {
         setRows(updatedRows);
         setScannedRow(updatedRow);
         setDialogState('success');
-        setLastCheckedInCode(uniqueCode); 
         setIsAlertOpen(true);
       }
     } else {
@@ -229,17 +240,6 @@ export default function DashboardPage() {
     }
   }, [rows, headers, isScanning, stopScan]);
   
-  const handleAlertClose = React.useCallback(() => {
-    setIsAlertOpen(false);
-    checkInForm.reset();
-    
-    if (isContinuous && scanSourceRef.current === 'camera') {
-      setTimeout(() => startScan(), 100); 
-    } else if (isContinuous && scanSourceRef.current === 'form') {
-      inputRef.current?.focus();
-    }
-  }, [isContinuous, checkInForm, startScan]);
-
 
   React.useEffect(() => {
     return () => {
@@ -257,6 +257,9 @@ export default function DashboardPage() {
   }, [isAlertOpen, dialogState, isContinuous, handleAlertClose]);
 
   const processSheetData = (wb: WorkBook, sheetName: string) => {
+    rowRefs.current = [];
+    setHighlightedRowIndex(null);
+
     const worksheet = wb.Sheets[sheetName];
     if (!worksheet) {
         toast({
@@ -291,7 +294,7 @@ export default function DashboardPage() {
         });
     });
     const extractedHeaders = Array.from(headerSet);
-
+    
     const processedRows = jsonData.map(row => ({
       ...row,
       checkedInTime: null
@@ -299,10 +302,8 @@ export default function DashboardPage() {
 
     setHeaders(extractedHeaders);
     setRows(processedRows);
-    
+    setActiveSheetName(sheetName);
     setScannedRow(null);
-    rowRefs.current = [];
-    setHighlightedRowIndex(null);
 
     toast({
       title: "Success!",
@@ -321,14 +322,15 @@ export default function DashboardPage() {
         const wb = XLSX.read(data, { type: "array" });
         const names = wb.SheetNames;
         
-        setWorkbook(wb);
-        setSheetNames(names);
-        
+        // Reset state before processing
+        setWorkbook(null);
+        setSheetNames([]);
         setHeaders([]);
         setRows([]);
         setScannedRow(null);
         setHighlightedRowIndex(null);
         rowRefs.current = [];
+        setActiveSheetName(null);
 
         if (names.length === 0) {
             toast({
@@ -336,10 +338,14 @@ export default function DashboardPage() {
                 title: "No Sheets Found",
                 description: "The uploaded Excel file does not contain any sheets.",
             });
-        } else if (names.length === 1) {
-            processSheetData(wb, names[0]);
         } else {
-            setIsSheetSelectorOpen(true);
+            setWorkbook(wb);
+            setSheetNames(names);
+            if (names.length === 1) {
+                processSheetData(wb, names[0]);
+            } else {
+                setIsSheetSelectorOpen(true);
+            }
         }
         
       } catch (error) {
@@ -378,35 +384,44 @@ export default function DashboardPage() {
   };
 
   const handleExport = () => {
-    if (rows.length === 0) {
+    if (!workbook || !activeSheetName) {
         toast({
             variant: "destructive",
-            title: "No Data",
-            description: "There is no data to export."
+            title: "No Workbook Found",
+            description: "Please upload an Excel file first."
         });
         return;
     }
 
+    // Create a deep copy of the workbook to avoid modifying the original state directly
+    const newWorkbook = JSON.parse(JSON.stringify(workbook));
+
     const dataToExport = rows.map(row => {
         const newRow: Record<string, any> = {};
-        for (const header of headers) {
-            newRow[header] = row[header];
-        }
+        // Ensure all original headers are present
+        headers.forEach(header => {
+            newRow[header] = row[header] ?? '';
+        });
         newRow['Checked-In At'] = row.checkedInTime ? format(row.checkedInTime, 'yyyy-MM-dd HH:mm:ss') : 'N/A';
         return newRow;
     });
 
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-    const newWorkbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(newWorkbook, worksheet, "Attendee Report");
-
+    // Get the original worksheet
+    const worksheet = newWorkbook.Sheets[activeSheetName];
+    
+    // Overwrite the sheet with updated data, preserving styles as much as possible
+    XLSX.utils.sheet_add_json(worksheet, dataToExport, {
+        skipHeader: false,
+        origin: 'A1' // Start from the beginning
+    });
+    
     const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
 
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', 'attendee_report.xlsx');
+    link.setAttribute('download', 'attendee_report_updated.xlsx');
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -414,7 +429,7 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
     toast({
         title: "Export Successful",
-        description: "The attendee report has been downloaded."
+        description: "The updated attendee report has been downloaded."
     });
   };
 
@@ -448,7 +463,7 @@ export default function DashboardPage() {
                     ref={fileInputRef}
                     onChange={handleFileChange}
                     className="hidden"
-                    accept=".xlsx, .xls, .csv"
+                    accept=".xlsx, .xls"
                 />
                 <Button onClick={() => fileInputRef.current?.click()} className="w-full">
                     <Upload className="mr-2 h-4 w-4" />
@@ -697,5 +712,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
