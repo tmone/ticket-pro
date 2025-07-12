@@ -7,6 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
+import { useRouter } from "next/navigation";
 import type { WorkBook, WorkSheet, CellObject, ExcelDataType } from "xlsx";
 import jsqr from "jsqr";
 
@@ -44,10 +45,14 @@ import {
   UserCheck,
   AlertTriangle,
   Camera,
-  FileSpreadsheet
+  FileSpreadsheet,
+  CheckCircle,
+  LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UniversalExcelHandler } from "@/lib/excel-handler";
+import { GoogleSheetsConnector } from "@/components/google-sheets-connector";
+import { useGoogleSheetsApi } from "@/hooks/use-google-sheets-api";
 
 // Note: Excel utility functions moved to src/lib/excel-utils.ts for better organization
 
@@ -59,6 +64,7 @@ type DialogState = 'success' | 'duplicate' | 'not_found';
 
 export default function DashboardPage() {
   const { toast } = useToast();
+  const router = useRouter();
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -85,6 +91,11 @@ export default function DashboardPage() {
   const [isSheetSelectorOpen, setIsSheetSelectorOpen] = React.useState(false);
   const [highlightedRowIndex, setHighlightedRowIndex] = React.useState<number | null>(null);
   const [isClient, setIsClient] = React.useState(false);
+  const [dataSource, setDataSource] = React.useState<'excel' | 'google-sheets'>('excel');
+  const [isGoogleSheetsConnected, setIsGoogleSheetsConnected] = React.useState(false);
+  
+  // Google Sheets integration - single instance
+  const googleSheetsApi = useGoogleSheetsApi();
   
   React.useEffect(() => {
     setIsClient(true);
@@ -190,13 +201,30 @@ export default function DashboardPage() {
         setDialogState('duplicate');
         setIsAlertOpen(true);
       } else {
-        const updatedRow = { ...foundRowData, checkedInTime: new Date(), __rowNum__: foundRowData.__rowNum__ };
+        const checkInTime = new Date();
+        const updatedRow = { ...foundRowData, checkedInTime: checkInTime, __rowNum__: foundRowData.__rowNum__ };
         const updatedRows = [...rows];
         updatedRows[foundRowIndex] = updatedRow;
         setRows(updatedRows);
         setScannedRow(updatedRow);
         setDialogState('success');
         setIsAlertOpen(true);
+        
+        // Real-time save to Google Sheets if connected
+        console.log('Google Sheets save check:', {
+          dataSource,
+          isGoogleSheetsConnected,
+          rowNum: foundRowData.__rowNum__,
+          shouldSave: dataSource === 'google-sheets' && isGoogleSheetsConnected && foundRowData.__rowNum__
+        });
+        
+        if (dataSource === 'google-sheets' && isGoogleSheetsConnected && foundRowData.__rowNum__) {
+          console.log('Saving to Google Sheets, row:', foundRowData.__rowNum__);
+          googleSheetsApi.saveCheckIn(foundRowData.__rowNum__, checkInTime).catch(error => {
+            console.error('Failed to save check-in to Google Sheets:', error);
+            // Note: We don't show user error here to avoid disrupting the check-in flow
+          });
+        }
       }
     } else {
       setScannedRow(undefined);
@@ -249,6 +277,16 @@ export default function DashboardPage() {
       setIsScanning(false);
     }
   }, [isScanning, tick]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push('/login');
+      router.refresh();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
 
   const handleAlertClose = React.useCallback(() => {
     setIsAlertOpen(false);
@@ -473,7 +511,42 @@ export default function DashboardPage() {
     }
   };
 
+  const handleGoogleSheetsDataLoaded = React.useCallback((data: { headers: string[]; rows: any[] }) => {
+    setHeaders(data.headers);
+    setRows(data.rows);
+    setDataSource('google-sheets');
+    setActiveSheetName('Google Sheets');
+    setScannedRow(null);
+    setHighlightedRowIndex(null);
+    rowRefs.current = [];
+    
+    toast({
+      title: "Google Sheets Connected!",
+      description: `Successfully loaded ${data.rows.length} attendees from Google Sheets.`,
+    });
+  }, [toast]);
+
+  const handleGoogleSheetsConnectionChange = React.useCallback((isConnected: boolean) => {
+    setIsGoogleSheetsConnected(isConnected);
+    if (!isConnected) {
+      // Reset to Excel mode when disconnected
+      setDataSource('excel');
+      setHeaders([]);
+      setRows([]);
+      setActiveSheetName(null);
+    }
+  }, []);
+
   const handleExport = async () => {
+    // Disable export for Google Sheets (data is saved real-time)
+    if (dataSource === 'google-sheets') {
+      toast({
+        title: "Export Not Needed",
+        description: "Check-in data is automatically saved to Google Sheets in real-time.",
+      });
+      return;
+    }
+    
     if (!excelHandler || !activeSheetName) {
       toast({
         variant: "destructive",
@@ -531,39 +604,58 @@ export default function DashboardPage() {
             <h1 className="text-xl font-bold">TicketCheck Pro</h1>
         </div>
         <div className="ml-auto flex items-center gap-4">
-            <Button onClick={handleExport} variant="outline" size="sm" disabled={rows.length === 0}>
-                <Download className="mr-2 h-4 w-4"/>
-                Export Report
+            {dataSource === 'google-sheets' ? (
+              <div className="flex items-center gap-2 text-sm text-green-600">
+                <CheckCircle className="h-4 w-4" />
+                Auto-saving to Google Sheets
+              </div>
+            ) : (
+              <Button onClick={handleExport} variant="outline" size="sm" disabled={rows.length === 0}>
+                  <Download className="mr-2 h-4 w-4"/>
+                  Export Report
+              </Button>
+            )}
+            <Button onClick={handleLogout} variant="outline" size="sm">
+              <LogOut className="mr-2 h-4 w-4" />
+              Logout
             </Button>
         </div>
       </header>
       <main className="flex-1 p-4 sm:px-6 sm:py-0">
         <div className="grid auto-rows-max items-start gap-4 md:gap-8 lg:grid-cols-2 xl:grid-cols-3">
           <div className="grid auto-rows-max items-start gap-4 md:gap-8 lg:col-span-1">
-            <Card>
-              <CardHeader>
-                <CardTitle>Upload Attendee List</CardTitle>
-                <CardDescription>
-                    Select an Excel file. If it has multiple sheets, you will be prompted to choose one.
-                    <br />
-                    <small className="text-muted-foreground">✓ All original formatting will be preserved when downloading the updated report.</small>
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    className="hidden"
-                    accept=".xlsx,.xls,.xlsm,.xlsb"
-                    title="Upload Excel file (.xlsx, .xls, .xlsm, .xlsb)"
-                />
-                <Button onClick={() => fileInputRef.current?.click()} className="w-full">
-                    <Upload className="mr-2 h-4 w-4" />
-                    Upload Excel File
-                </Button>
-              </CardContent>
-            </Card>
+            {!isGoogleSheetsConnected && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Upload Attendee List</CardTitle>
+                  <CardDescription>
+                      Select an Excel file. If it has multiple sheets, you will be prompted to choose one.
+                      <br />
+                      <small className="text-muted-foreground">✓ All original formatting will be preserved when downloading the updated report.</small>
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileChange}
+                      className="hidden"
+                      accept=".xlsx,.xls,.xlsm,.xlsb"
+                      title="Upload Excel file (.xlsx, .xls, .xlsm, .xlsb)"
+                  />
+                  <Button onClick={() => fileInputRef.current?.click()} className="w-full">
+                      <Upload className="mr-2 h-4 w-4" />
+                      Upload Excel File
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+            
+            <GoogleSheetsConnector 
+              onDataLoaded={handleGoogleSheetsDataLoaded}
+              onConnectionChange={handleGoogleSheetsConnectionChange}
+              googleSheetsApi={googleSheetsApi}
+            />
             
             <Card>
               <CardHeader>
