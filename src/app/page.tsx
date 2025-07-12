@@ -189,7 +189,7 @@ export default function DashboardPage() {
       setDialogState('not_found');
       setIsAlertOpen(true);
     }
-  }, [rows, headers, isContinuous, lastCheckedInCode]);
+  }, [rows, headers, isContinuous, lastCheckedInCode, stopScan]);
   
   const tick = React.useCallback(() => {
     if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
