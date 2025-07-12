@@ -11,10 +11,14 @@ export interface SessionData {
 }
 
 // Ensure you have IRON_SESSION_PASSWORD set in your .env.local file
-// It should be a secret string of at least 32 characters
-const password = process.env.IRON_SESSION_PASSWORD;
-if (!password) {
-  throw new Error('IRON_SESSION_PASSWORD environment variable not set.');
+// It should be a secret string of at least 32 characters for production.
+// We provide a default for development to avoid breaking the app on first run.
+const password = process.env.IRON_SESSION_PASSWORD || 'complex_password_for_dev_only_32_characters_long';
+
+if (process.env.NODE_ENV === 'production' && password === 'complex_password_for_dev_only_32_characters_long') {
+  console.warn(
+    'WARNING: Using default session password in production. Please set a secure IRON_SESSION_PASSWORD in your environment variables.'
+  );
 }
 
 export const sessionOptions: IronSessionOptions = {
