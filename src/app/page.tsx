@@ -314,7 +314,7 @@ export default function DashboardPage() {
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: "array" });
+        const wb = XLSX.read(data, { type: "array", cellStyles: true });
         const names = wb.SheetNames;
         
         // Reset state before processing
@@ -391,19 +391,9 @@ export default function DashboardPage() {
     }
 
     try {
-        // Create a safe, mutable deep copy of the workbook to avoid state mutation
-        const newWorkbook: WorkBook = {
-            Sheets: {},
-            SheetNames: workbook.SheetNames,
-            Props: workbook.Props
-        };
-        for (const name of workbook.SheetNames) {
-           // This is a shallow copy of the sheet object, which is fine
-           // because we'll only be modifying cell values, not the sheet object itself.
-           newWorkbook.Sheets[name] = {...workbook.Sheets[name]};
-        }
-
-        const ws = newWorkbook.Sheets[activeSheetName];
+        // IMPORTANT: Work directly on the workbook object from state.
+        // DO NOT create a deep copy using JSON.stringify, as it destroys formatting.
+        const ws = workbook.Sheets[activeSheetName];
         if (!ws) {
             toast({
               variant: "destructive",
@@ -413,10 +403,9 @@ export default function DashboardPage() {
             return;
         }
         
-        // Find the first empty column in the header row to add "Checked-In At"
         const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
         const headerRowIndex = range.s.r;
-        let checkInColIndex = range.e.c + 1;
+        const checkInColIndex = range.e.c + 1; // Add new column after the last existing one
 
         // Add the "Checked-In At" header
         const headerCellAddress = XLSX.utils.encode_cell({ c: checkInColIndex, r: headerRowIndex });
@@ -425,13 +414,13 @@ export default function DashboardPage() {
         // Iterate through checked-in rows and update the sheet cell by cell
         rows.forEach((row, rowIndex) => {
             if (row.checkedInTime) {
-                // +1 to account for the header row in Excel sheet (assuming header is on first row)
+                // +1 to account for the header row in Excel sheet
                 const excelRowIndex = rowIndex + 1 + headerRowIndex;
                 const cellAddress = XLSX.utils.encode_cell({ c: checkInColIndex, r: excelRowIndex });
                 const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
                 
-                // Add the value to the specific cell
-                XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
+                // Add the value to the specific cell, preserving original cell objects
+                 XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
             }
         });
         
@@ -442,7 +431,8 @@ export default function DashboardPage() {
         }
         ws['!ref'] = XLSX.utils.encode_range(newRange);
         
-        const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
+        // Write the modified workbook object directly
+        const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
         const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
 
         const link = document.createElement('a');
@@ -748,3 +738,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
