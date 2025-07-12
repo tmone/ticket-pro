@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -99,6 +100,51 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const tick = React.useCallback(() => {
+    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+        if (ctx) {
+            canvas.height = video.videoHeight;
+            canvas.width = video.videoWidth;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsqr(imageData.data, imageData.width, imageData.height);
+
+            if (code && code.data) {
+              scanSourceRef.current = 'camera';
+              checkInForm.setValue('uniqueCode', code.data);
+              handleCheckIn({ uniqueCode: code.data });
+              return;
+            }
+        }
+    }
+    if (animationFrameIdRef.current) {
+      animationFrameIdRef.current = requestAnimationFrame(tick);
+    }
+  }, [checkInForm]);
+
+  const startScan = React.useCallback(async () => {
+    setScanError(null);
+    if (isScanning || animationFrameIdRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await new Promise(resolve => videoRef.current!.onloadedmetadata = resolve);
+        await videoRef.current.play();
+        setIsScanning(true);
+        animationFrameIdRef.current = requestAnimationFrame(tick);
+      }
+    } catch (err) {
+      console.error("Camera access error:", err);
+      setScanError("Camera access denied. Please enable it in your browser settings.");
+      setIsScanning(false);
+    }
+  }, [isScanning, tick]);
+
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
     if (!uniqueCode) return;
@@ -183,65 +229,17 @@ export default function DashboardPage() {
     }
   }, [rows, headers, isScanning, stopScan]);
   
-  const tick = React.useCallback(() => {
-    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-
-        if (ctx) {
-            canvas.height = video.videoHeight;
-            canvas.width = video.videoWidth;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsqr(imageData.data, imageData.width, imageData.height);
-
-            if (code && code.data) {
-              scanSourceRef.current = 'camera';
-              handleCheckIn({ uniqueCode: code.data });
-              return;
-            }
-        }
-    }
-    if (animationFrameIdRef.current) {
-      animationFrameIdRef.current = requestAnimationFrame(tick);
-    }
-  }, [handleCheckIn]);
-
-  const startScan = React.useCallback(async () => {
-    setScanError(null);
-    if (isScanning || animationFrameIdRef.current) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await new Promise(resolve => videoRef.current!.onloadedmetadata = resolve);
-        await videoRef.current.play();
-        setIsScanning(true);
-        animationFrameIdRef.current = requestAnimationFrame(tick);
-      }
-    } catch (err) {
-      console.error("Camera access error:", err);
-      setScanError("Camera access denied. Please enable it in your browser settings.");
-      setIsScanning(false);
-    }
-  }, [isScanning, tick]);
-
   const handleAlertClose = React.useCallback(() => {
     setIsAlertOpen(false);
     checkInForm.reset();
-    const uniqueCode = checkInForm.getValues("uniqueCode");
     
     if (isContinuous && scanSourceRef.current === 'camera') {
-      if (uniqueCode === lastCheckedInCode && dialogState === 'duplicate') {
-        setTimeout(() => startScan(), 100);
-      } else {
-        setTimeout(() => startScan(), 100); 
-      }
+      setTimeout(() => startScan(), 100); 
     } else if (isContinuous && scanSourceRef.current === 'form') {
       inputRef.current?.focus();
     }
-  }, [isContinuous, checkInForm, startScan, lastCheckedInCode, dialogState]);
+  }, [isContinuous, checkInForm, startScan]);
+
 
   React.useEffect(() => {
     return () => {
@@ -270,7 +268,6 @@ export default function DashboardPage() {
     }
 
     const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
-      header: 1,
       defval: '',
     });
 
@@ -285,19 +282,20 @@ export default function DashboardPage() {
       return;
     }
     
-    const headerRow = jsonData[0] as string[];
-    const dataRows = jsonData.slice(1);
-    
-    const extractedHeaders = headerRow.filter(h => h);
-    
-    const processedRows = dataRows.map(rowArray => {
-      const rowObject: Record<string, any> = {};
-      extractedHeaders.forEach((header, index) => {
-        rowObject[header] = rowArray[index];
-      });
-      rowObject.checkedInTime = null;
-      return rowObject;
+    const headerSet = new Set<string>();
+    jsonData.forEach(row => {
+        Object.keys(row).forEach(key => {
+            if (key !== '__rowNum__') {
+                headerSet.add(key);
+            }
+        });
     });
+    const extractedHeaders = Array.from(headerSet);
+
+    const processedRows = jsonData.map(row => ({
+      ...row,
+      checkedInTime: null
+    }));
 
     setHeaders(extractedHeaders);
     setRows(processedRows);
@@ -399,13 +397,16 @@ export default function DashboardPage() {
     });
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-    const csvContent = XLSX.utils.sheet_to_csv(worksheet);
+    const newWorkbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(newWorkbook, worksheet, "Attendee Report");
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
+
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', 'attendee_report.csv');
+    link.setAttribute('download', 'attendee_report.xlsx');
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -696,3 +697,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
