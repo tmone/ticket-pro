@@ -8,7 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
 import type { WorkBook } from "xlsx";
-import jsQR from "jsqr";
+import jsqr from "jsqr";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -104,6 +104,12 @@ export default function DashboardPage() {
       setIsScanning(false);
     }
   }, [isScanning]);
+
+  const restartContinuousScan = React.useCallback(() => {
+      stopScan();
+      setTimeout(() => startScan(), 100);
+  }, [startScan, stopScan]);
+
 
   React.useEffect(() => {
     return () => {
@@ -237,23 +243,20 @@ export default function DashboardPage() {
 
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
-
     if (!uniqueCode) return;
+    
+    // Stop the camera scanning process since we have a code to process
+    if (scanSourceRef.current === 'camera') {
+      stopScan();
+    }
     
     // This is a duplicate scan of the last successful one, ignore it.
     if (uniqueCode === lastCheckedInCode) {
       checkInForm.reset();
       if (isContinuous && scanSourceRef.current === 'camera') {
-         // This is a duplicate scan. We need to reset the camera for the next cycle.
-         stopScan();
-         setTimeout(() => startScan(), 50);
+         restartContinuousScan();
       }
       return; 
-    }
-    
-    // Manage camera state if the source was the camera
-    if (scanSourceRef.current === 'camera') {
-        stopScan();
     }
     
     let codeToSearch = uniqueCode.trim();
@@ -281,26 +284,23 @@ export default function DashboardPage() {
             const cellValue = row[header];
             if (cellValue === undefined || cellValue === null) continue;
 
-            const lowerCaseCellValue = String(cellValue).trim().toLowerCase();
-            const lowerCaseCodeToSearch = codeToSearch.toLowerCase();
-            
-            let cellCode = lowerCaseCellValue;
+            let cellCode = String(cellValue).trim();
             try {
-                const url = new URL(lowerCaseCellValue);
+                const url = new URL(cellCode);
                 const params = url.searchParams;
                 if (params.get("code")) {
-                    cellCode = params.get("code")!.trim().toLowerCase();
+                    cellCode = params.get("code")!.trim();
                 } else if (params.get("id")) {
-                    cellCode = params.get("id")!.trim().toLowerCase();
+                    cellCode = params.get("id")!.trim();
                 } else {
                    const firstParam = params.values().next().value;
                    if (firstParam) {
-                       cellCode = firstParam.trim().toLowerCase();
+                       cellCode = firstParam.trim();
                    }
                 }
             } catch (e) { /* not a url */ }
 
-            if (lowerCaseCodeToSearch === cellCode) {
+            if (codeToSearch.toLowerCase() === cellCode.toLowerCase()) {
                 foundRowIndex = i;
                 break;
             }
@@ -315,16 +315,13 @@ export default function DashboardPage() {
     if (foundRowIndex !== -1 && foundRowData) {
       if (foundRowData.checkedInTime) {
         const timeSinceCheckIn = new Date().getTime() - new Date(foundRowData.checkedInTime).getTime();
-        // If checked in within the last minute, just ignore it and restart scan if continuous
         if (timeSinceCheckIn < 60000) {
             checkInForm.reset();
             if (isContinuous && scanSourceRef.current === 'camera') {
-              stopScan();
-              setTimeout(() => startScan(), 50);
+              restartContinuousScan();
             }
             return;
         }
-        // Otherwise, show duplicate alert
         setScannedRow(foundRowData);
         setDialogState('duplicate');
         setIsAlertOpen(true);
@@ -335,7 +332,7 @@ export default function DashboardPage() {
         setRows(updatedRows);
         setScannedRow(updatedRow);
         setDialogState('success');
-        setLastCheckedInCode(uniqueCode); // Set code on successful check-in
+        setLastCheckedInCode(uniqueCode); 
         setIsAlertOpen(true);
       }
     } else {
@@ -344,11 +341,11 @@ export default function DashboardPage() {
       setIsAlertOpen(true);
     }
     
-  }, [rows, headers, stopScan, lastCheckedInCode, checkInForm, isContinuous, startScan]);
+  }, [rows, headers, stopScan, lastCheckedInCode, checkInForm, isContinuous, restartContinuousScan]);
 
 
   const tick = React.useCallback(() => {
-    if (isScanning && videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
+    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -358,24 +355,25 @@ export default function DashboardPage() {
             canvas.width = video.videoWidth;
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            const code = jsqr(imageData.data, imageData.width, imageData.height);
 
             if (code && code.data) {
                 scanSourceRef.current = 'camera';
                 checkInForm.setValue("uniqueCode", code.data, { shouldValidate: true });
-                // Use a timeout to ensure the form state is updated before submitting
                 setTimeout(() => {
                     checkInForm.handleSubmit(handleCheckIn)();
                 }, 0);
-                return; // Exit tick loop once a code is found and processed
+            } else {
+                animationFrameIdRef.current = requestAnimationFrame(tick);
             }
+        } else {
+            animationFrameIdRef.current = requestAnimationFrame(tick);
         }
-    }
-    // Continue scanning if no code was found
-    if (isScanning) {
+    } else {
         animationFrameIdRef.current = requestAnimationFrame(tick);
     }
-  }, [isScanning, checkInForm, handleCheckIn]);
+  }, [checkInForm, handleCheckIn]);
+
 
   React.useEffect(() => {
     if (isScanning) {
@@ -444,13 +442,13 @@ export default function DashboardPage() {
     
     if (isContinuous) {
       if (scanSourceRef.current === 'camera') {
-          setTimeout(() => startScan(), 100); 
+        restartContinuousScan();
       } else if (scanSourceRef.current === 'form') {
           inputRef.current?.focus();
       }
     }
     
-  }, [isContinuous, checkInForm, startScan]);
+  }, [isContinuous, checkInForm, restartContinuousScan]);
 
   React.useEffect(() => {
       if (isContinuous && dialogState === 'success' && isAlertOpen) {
@@ -721,3 +719,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
