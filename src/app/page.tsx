@@ -20,6 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -51,7 +52,8 @@ import {
   CheckCircle,
   Archive,
   Mail,
-  LogOut
+  LogOut,
+  Loader2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UniversalExcelHandler } from "@/lib/excel-handler";
@@ -107,6 +109,17 @@ export default function DashboardPage() {
   const [ticketProgress, setTicketProgress] = React.useState({ current: 0, total: 0 });
   const [isEmailModalOpen, setIsEmailModalOpen] = React.useState(false);
   const [emailColumn, setEmailColumn] = React.useState<string>('');
+  const [showResendConfirm, setShowResendConfirm] = React.useState(false);
+  const [resendConfirmData, setResendConfirmData] = React.useState<{
+    previouslySent: string[];
+    totalSelected: number;
+  }>({ previouslySent: [], totalSelected: 0 });
+  const [isCheckingEmails, setIsCheckingEmails] = React.useState(false);
+  const [showInvalidDataConfirm, setShowInvalidDataConfirm] = React.useState(false);
+  const [invalidDataInfo, setInvalidDataInfo] = React.useState<{
+    invalidRows: { index: number; reason: string }[];
+    validCount: number;
+  }>({ invalidRows: [], validCount: 0 });
   
   // Google Sheets integration - single instance
   const googleSheetsApi = useGoogleSheetsApi();
@@ -431,7 +444,7 @@ export default function DashboardPage() {
     }
   };
 
-  const handleSendEmails = () => {
+  const handleSendEmails = async () => {
     if (!emailColumn || selectedRows.size === 0) {
       toast({
         title: "Error",
@@ -440,6 +453,147 @@ export default function DashboardPage() {
       });
       return;
     }
+    
+    // Email validation regex
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
+    // Check for invalid emails before proceeding
+    const invalidRows: { index: number; reason: string }[] = [];
+    selectedRows.forEach(index => {
+      const row = rows[index];
+      const email = row[emailColumn];
+      const qrData = row[qrCodeColumn];
+      
+      if (!email || email.toString().trim() === '') {
+        invalidRows.push({ index: index + 1, reason: 'Empty email' });
+      } else if (!emailRegex.test(email.toString().trim())) {
+        invalidRows.push({ index: index + 1, reason: `Invalid email format: ${email}` });
+      } else if (!qrData || qrData.toString().trim() === '') {
+        invalidRows.push({ index: index + 1, reason: 'Empty QR code' });
+      }
+    });
+    
+    if (invalidRows.length > 0) {
+      const validCount = selectedRows.size - invalidRows.length;
+      
+      if (validCount === 0) {
+        // All rows are invalid
+        toast({
+          title: "No Valid Emails",
+          description: "All selected rows have empty email addresses or QR codes. Please check your data.",
+          variant: "destructive",
+        });
+        return;
+      } else {
+        // Some rows are invalid, ask for confirmation
+        setInvalidDataInfo({ invalidRows, validCount });
+        setShowInvalidDataConfirm(true);
+        return;
+      }
+    }
+    
+    setIsCheckingEmails(true);
+    
+    // Check for previously sent emails before opening modal
+    if (googleSheetsApi.state.spreadsheetId && activeSheetName) {
+      try {
+        const emailsToCheck = selectedEmailData.map(e => e.email);
+        
+        console.log('Checking emails before send:', {
+          spreadsheetId: googleSheetsApi.state.spreadsheetId,
+          sheetName: activeSheetName,
+          emailsToCheck
+        });
+        
+        const response = await fetch('/api/check-sent-emails', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            spreadsheetId: googleSheetsApi.state.spreadsheetId,
+            sheetName: activeSheetName,
+            emailAddresses: emailsToCheck,
+            emailColumn // Pass the user-selected email column
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Check sent emails response:', data);
+          const previouslySent = data.previouslySentEmails || [];
+          
+          if (previouslySent.length > 0) {
+            // Show confirmation dialog
+            setResendConfirmData({
+              previouslySent: previouslySent,
+              totalSelected: emailsToCheck.length
+            });
+            setShowResendConfirm(true);
+            setIsCheckingEmails(false);
+            return; // Don't open email modal yet
+          }
+        } else {
+          console.error('Check sent emails failed:', await response.text());
+        }
+      } catch (error) {
+        console.error('Failed to check previously sent emails:', error);
+        // Continue anyway if check fails
+      }
+    }
+    
+    setIsCheckingEmails(false);
+    setIsEmailModalOpen(true);
+  };
+  
+  const proceedWithEmailCheck = async () => {
+    setShowInvalidDataConfirm(false);
+    setIsCheckingEmails(true);
+    
+    // Check for previously sent emails before opening modal
+    if (googleSheetsApi.state.spreadsheetId && activeSheetName) {
+      try {
+        const emailsToCheck = selectedEmailData.map(e => e.email);
+        
+        console.log('Checking emails before send:', {
+          spreadsheetId: googleSheetsApi.state.spreadsheetId,
+          sheetName: activeSheetName,
+          emailsToCheck
+        });
+        
+        const response = await fetch('/api/check-sent-emails', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            spreadsheetId: googleSheetsApi.state.spreadsheetId,
+            sheetName: activeSheetName,
+            emailAddresses: emailsToCheck,
+            emailColumn
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Check sent emails response:', data);
+          const previouslySent = data.previouslySentEmails || [];
+          
+          if (previouslySent.length > 0) {
+            // Show confirmation dialog
+            setResendConfirmData({
+              previouslySent: previouslySent,
+              totalSelected: emailsToCheck.length
+            });
+            setShowResendConfirm(true);
+            setIsCheckingEmails(false);
+            return;
+          }
+        } else {
+          console.error('Check sent emails failed:', await response.text());
+        }
+      } catch (error) {
+        console.error('Failed to check previously sent emails:', error);
+      }
+    }
+    
+    setIsCheckingEmails(false);
     setIsEmailModalOpen(true);
   };
 
@@ -451,9 +605,11 @@ export default function DashboardPage() {
       const row = rows[index];
       return {
         email: String(row[emailColumn] || ''),
-        name: row['Name'] || row['name'] || row['Full Name'] || row['full_name'] || '', // Try common name columns
+        name: '', // Keep for backward compatibility
         qrData: String(row[qrCodeColumn] || ''),
-        rowNumber: (index + 1).toString().padStart(4, '0')
+        rowNumber: (index + 1).toString().padStart(4, '0'),
+        originalRowIndex: index, // Add original row index for Google Sheets update
+        rowData: row // Include full row data for template placeholders
       };
     }).filter(item => item.email && item.qrData); // Only include rows with email and QR data
   }, [selectedRows, emailColumn, qrCodeColumn, rows]);
@@ -697,11 +853,11 @@ export default function DashboardPage() {
     }
   };
 
-  const handleGoogleSheetsDataLoaded = React.useCallback((data: { headers: string[]; rows: any[] }) => {
+  const handleGoogleSheetsDataLoaded = React.useCallback((data: { headers: string[]; rows: any[]; sheetName: string }) => {
     setHeaders(data.headers);
     setRows(data.rows);
     setDataSource('google-sheets');
-    setActiveSheetName('Google Sheets');
+    setActiveSheetName(data.sheetName);
     setScannedRow(null);
     setHighlightedRowIndex(null);
     
@@ -1044,10 +1200,19 @@ export default function DashboardPage() {
                               <Button
                                 onClick={handleSendEmails}
                                 variant="outline"
-                                disabled={isGeneratingTickets}
+                                disabled={isGeneratingTickets || isCheckingEmails || isEmailModalOpen}
                               >
-                                <Mail className="mr-2 h-4 w-4" />
-                                Send Emails ({selectedRows.size})
+                                {isCheckingEmails ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Checking...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Mail className="mr-2 h-4 w-4" />
+                                    Send Emails ({selectedRows.size})
+                                  </>
+                                )}
                               </Button>
                             )}
                           </div>
@@ -1235,8 +1400,114 @@ export default function DashboardPage() {
       <EmailModal
         open={isEmailModalOpen}
         onOpenChange={setIsEmailModalOpen}
+        onSuccess={() => {
+          // Clear selected rows after successful email send
+          setSelectedRows(new Set());
+        }}
         selectedEmails={selectedEmailData}
+        spreadsheetId={googleSheetsApi.state.spreadsheetId || undefined}
+        sheetName={activeSheetName || undefined}
+        emailColumn={emailColumn}
+        headers={headers}
       />
+      
+      <AlertDialog open={showResendConfirm} onOpenChange={setShowResendConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>⚠️ Email Already Sent Warning</AlertDialogTitle>
+            <AlertDialogDescription>
+              {resendConfirmData.previouslySent.length === resendConfirmData.totalSelected 
+                ? `All ${resendConfirmData.previouslySent.length} selected recipients have already received emails.`
+                : `${resendConfirmData.previouslySent.length} out of ${resendConfirmData.totalSelected} selected recipients have already received emails:`
+              }
+              
+              {resendConfirmData.previouslySent.length > 0 && resendConfirmData.previouslySent.length !== resendConfirmData.totalSelected && (
+                <div className="mt-2 max-h-32 overflow-auto bg-muted p-2 rounded">
+                  {resendConfirmData.previouslySent.slice(0, 10).map((email, index) => (
+                    <div key={index} className="text-xs">{email}</div>
+                  ))}
+                  {resendConfirmData.previouslySent.length > 10 && (
+                    <div className="text-xs text-muted-foreground">... and {resendConfirmData.previouslySent.length - 10} more</div>
+                  )}
+                </div>
+              )}
+              
+              <div className="mt-3 font-semibold">
+                Do you want to proceed and send emails to all selected recipients?
+              </div>
+              <div className="text-sm text-muted-foreground">
+                This may be considered spam by recipients who already received the email.
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setShowResendConfirm(false);
+                setResendConfirmData({ previouslySent: [], totalSelected: 0 });
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setShowResendConfirm(false);
+                setIsEmailModalOpen(true);
+              }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Yes, Send Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      
+      <AlertDialog open={showInvalidDataConfirm} onOpenChange={setShowInvalidDataConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>⚠️ Invalid Data Warning</AlertDialogTitle>
+            <AlertDialogDescription>
+              {invalidDataInfo.invalidRows.length} out of {invalidDataInfo.invalidRows.length + invalidDataInfo.validCount} selected rows have invalid data:
+              
+              <div className="mt-2 max-h-32 overflow-auto bg-muted p-2 rounded">
+                {invalidDataInfo.invalidRows.slice(0, 10).map(({ index, reason }) => (
+                  <div key={index} className="text-xs">
+                    Row {index}: {reason}
+                  </div>
+                ))}
+                {invalidDataInfo.invalidRows.length > 10 && (
+                  <div className="text-xs text-muted-foreground">
+                    ... and {invalidDataInfo.invalidRows.length - 10} more
+                  </div>
+                )}
+              </div>
+              
+              <div className="mt-3 font-semibold">
+                Do you want to proceed with sending emails to the {invalidDataInfo.validCount} valid recipients only?
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Rows with empty emails or QR codes will be skipped.
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setShowInvalidDataConfirm(false);
+                setInvalidDataInfo({ invalidRows: [], validCount: 0 });
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={proceedWithEmailCheck}
+              className="bg-orange-600 hover:bg-orange-700"
+            >
+              Send to {invalidDataInfo.validCount} Valid Recipients
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

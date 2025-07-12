@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,53 +14,101 @@ import { useToast } from "@/hooks/use-toast";
 interface EmailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  selectedEmails: { email: string; name?: string; qrData: string; rowNumber: string }[];
+  onSuccess?: () => void;
+  selectedEmails: { email: string; name?: string; qrData: string; rowNumber: string; originalRowIndex?: number; rowData?: Record<string, any> }[];
+  spreadsheetId?: string;
+  sheetName?: string;
+  emailColumn?: string;
+  headers?: string[];
 }
 
-export function EmailModal({ open, onOpenChange, selectedEmails }: EmailModalProps) {
+export function EmailModal({ open, onOpenChange, onSuccess, selectedEmails, spreadsheetId, sheetName, emailColumn, headers }: EmailModalProps) {
   const { toast } = useToast();
-  const [subject, setSubject] = React.useState("Your Event Ticket");
-  const [message, setMessage] = React.useState(`Dear {name},
+  const [subject, setSubject] = React.useState("");
+  const [message, setMessage] = React.useState("");
+  const [senderEmail, setSenderEmail] = React.useState("");
+  const [senderName, setSenderName] = React.useState("");
+  const [bccList, setBccList] = React.useState<string[]>([]);
+
+  // Load email template and sender info from server on mount
+  React.useEffect(() => {
+    const loadEmailTemplate = async () => {
+      try {
+        const response = await fetch('/api/get-email-template');
+        if (response.ok) {
+          const data = await response.json();
+          setSubject(data.subject || 'Your Event Ticket');
+          setMessage(data.message || '');
+          setSenderName(data.senderName || '');
+          setSenderEmail(data.senderEmail || '');
+          setBccList(data.bccList || []);
+        }
+      } catch (error) {
+        console.error('Failed to load email template:', error);
+        // Set fallback values
+        setSubject('Your Event Ticket');
+        setMessage(`Dear {name},
 
 Thank you for registering for our event. Please find your ticket attached.
 
 Best regards,
 Event Team`);
-  const [senderEmail, setSenderEmail] = React.useState("");
-  const [senderName, setSenderName] = React.useState("");
-  const [bccList, setBccList] = React.useState<string[]>([]);
-
-  // Load sender info from environment on mount
-  React.useEffect(() => {
-    const loadSenderInfo = async () => {
-      try {
-        const response = await fetch('/api/get-sender-info');
-        if (response.ok) {
-          const data = await response.json();
-          setSenderName(data.senderName);
-          setSenderEmail(data.senderEmail);
-          setBccList(data.bccList || []);
-        }
-      } catch (error) {
-        console.error('Failed to load sender info:', error);
       }
     };
     
     if (open) {
-      loadSenderInfo();
+      loadEmailTemplate();
     }
   }, [open]);
   const [attachTicket, setAttachTicket] = React.useState(true);
+  const [appendTicketInline, setAppendTicketInline] = React.useState(false);
   const [isSending, setIsSending] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
+  const [showResendWarning, setShowResendWarning] = React.useState(false);
+  const [previouslySentEmails, setPreviouslySentEmails] = React.useState<string[]>([]);
 
-  const handleSendEmails = async () => {
+  // Check for previously sent emails
+  React.useEffect(() => {
+    if (open && selectedEmails.length > 0 && spreadsheetId && sheetName) {
+      checkPreviouslySentEmails();
+    }
+  }, [open, selectedEmails, spreadsheetId, sheetName]);
+
+  const checkPreviouslySentEmails = async () => {
+    try {
+      const response = await fetch('/api/check-sent-emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          spreadsheetId,
+          sheetName,
+          emailAddresses: selectedEmails.map(e => e.email),
+          emailColumn
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPreviouslySentEmails(data.previouslySentEmails || []);
+      }
+    } catch (error) {
+      console.error('Failed to check previously sent emails:', error);
+    }
+  };
+
+  const handleSendEmails = async (forceResend = false) => {
     if (!senderEmail || !subject || !message) {
       toast({
         title: "Error",
         description: "Please fill in all required fields",
         variant: "destructive",
       });
+      return;
+    }
+
+    // Check for resend without force
+    if (!forceResend && previouslySentEmails.length > 0) {
+      setShowResendWarning(true);
       return;
     }
 
@@ -76,14 +125,27 @@ Event Team`);
           senderEmail,
           senderName,
           attachTicket,
+          appendTicketInline,
+          spreadsheetId,
+          sheetName,
+          emailColumnIndex: headers?.findIndex(h => h === emailColumn) || -1,
+          emailSentColumnName: 'Email Sent'
         }),
       });
 
       if (response.ok) {
+        const data = await response.json();
+        const updateInfo = data.updatedSuccessRows || data.updatedErrorRows 
+          ? ` (Updated ${data.updatedSuccessRows || 0} success + ${data.updatedErrorRows || 0} error rows in Google Sheets)`
+          : '';
         toast({
           title: "Success!",
-          description: `Emails sent to ${selectedEmails.length} recipients`,
+          description: `Sent ${data.successCount} emails successfully${data.failureCount > 0 ? `, ${data.failureCount} failed` : ''}${updateInfo}`,
         });
+        // Call success callback if provided
+        if (onSuccess) {
+          onSuccess();
+        }
         onOpenChange(false);
       } else {
         const error = await response.json();
@@ -98,6 +160,7 @@ Event Team`);
       });
     } finally {
       setIsSending(false);
+      setShowResendWarning(false);
     }
   };
 
@@ -146,11 +209,12 @@ Event Team`);
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-auto">
-        <DialogHeader>
-          <DialogTitle>Send Emails to Selected Recipients</DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>Send Emails to Selected Recipients</DialogTitle>
+          </DialogHeader>
         
         <div className="space-y-4">
           <div className="text-sm text-muted-foreground">
@@ -163,8 +227,9 @@ Event Team`);
               <Input
                 id="sender-name"
                 value={senderName}
-                onChange={(e) => setSenderName(e.target.value)}
                 placeholder="Your Name"
+                readOnly
+                className="bg-muted"
               />
             </div>
             <div>
@@ -174,10 +239,10 @@ Event Team`);
                   id="sender-email"
                   type="email"
                   value={senderEmail}
-                  onChange={(e) => setSenderEmail(e.target.value)}
                   placeholder="your@email.com"
                   required
-                  className="flex-1"
+                  readOnly
+                  className="flex-1 bg-muted"
                 />
                 <Button
                   type="button"
@@ -222,19 +287,33 @@ Event Team`);
               className="resize-none"
             />
             <div className="text-xs text-muted-foreground mt-1">
-              Use {"{name}"} to insert recipient name
+              Available placeholders: {headers && headers.length > 0 ? headers.map(h => `{${h}}`).join(', ') : 'Loading...'}<br/>
+              System placeholders: {"{senderName}"}, {"{senderEmail}"}, {"{ticketCode}"}, {"{eventDate}"}
             </div>
           </div>
           
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="attach-ticket"
-              checked={attachTicket}
-              onCheckedChange={(checked) => setAttachTicket(!!checked)}
-            />
-            <Label htmlFor="attach-ticket" className="text-sm">
-              Attach ticket as JPG image
-            </Label>
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="attach-ticket"
+                checked={attachTicket}
+                onCheckedChange={(checked) => setAttachTicket(!!checked)}
+              />
+              <Label htmlFor="attach-ticket" className="text-sm">
+                Attach ticket as JPG image
+              </Label>
+            </div>
+            
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="append-ticket-inline"
+                checked={appendTicketInline}
+                onCheckedChange={(checked) => setAppendTicketInline(!!checked)}
+              />
+              <Label htmlFor="append-ticket-inline" className="text-sm">
+                Append ticket as JPG image at bottom letter
+              </Label>
+            </div>
           </div>
           
           <div className="bg-muted p-3 rounded-lg">
@@ -258,6 +337,18 @@ Event Team`);
             </div>
           </div>
           
+          {previouslySentEmails.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <div className="text-sm font-medium text-yellow-800 mb-1">
+                ⚠️ Some emails have been sent before
+              </div>
+              <div className="text-xs text-yellow-700">
+                {previouslySentEmails.length} recipient(s) have already received emails. 
+                Continuing will resend to all selected recipients.
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 justify-end">
             <Button
               variant="outline"
@@ -267,7 +358,7 @@ Event Team`);
               Cancel
             </Button>
             <Button
-              onClick={handleSendEmails}
+              onClick={() => handleSendEmails(false)}
               disabled={isSending}
             >
               {isSending ? (
@@ -283,8 +374,45 @@ Event Team`);
               )}
             </Button>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={showResendWarning} onOpenChange={setShowResendWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Resend Confirmation</AlertDialogTitle>
+            <AlertDialogDescription>
+              {previouslySentEmails.length} of the selected recipients have already received emails:
+              <div className="mt-2 max-h-32 overflow-auto bg-muted p-2 rounded">
+                {previouslySentEmails.map((email, index) => (
+                  <div key={index} className="text-xs">{email}</div>
+                ))}
+              </div>
+              <div className="mt-2">
+                Are you sure you want to resend emails to all selected recipients? This may be considered spam.
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => handleSendEmails(true)}
+              disabled={isSending}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isSending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                'Yes, Resend All'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

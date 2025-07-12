@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface GoogleSheetsConnectorProps {
-  onDataLoaded: (data: { headers: string[]; rows: any[] }) => void;
+  onDataLoaded: (data: { headers: string[]; rows: any[]; sheetName: string }) => void;
   onConnectionChange: (isConnected: boolean) => void;
   googleSheetsApi: UseGoogleSheetsReturn;
 }
@@ -90,7 +90,7 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
       // Auto-load data after successful connection with the correct sheet
       const data = await loadAttendeeData(targetSheetName, spreadsheetId);
       if (data) {
-        onDataLoaded(data);
+        onDataLoaded({ ...data, sheetName: targetSheetName });
         onConnectionChange(true);
       }
     } catch (error) {
@@ -117,7 +117,7 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
     try {
       const data = await loadAttendeeData();
       if (data) {
-        onDataLoaded(data);
+        onDataLoaded({ ...data, sheetName });
       }
     } catch (error) {
       console.error('Failed to refresh data:', error);
@@ -157,7 +157,7 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
         connectToSheets(state.spreadsheetId, firstSheet).then(() => {
           loadAttendeeData(firstSheet, state.spreadsheetId).then(data => {
             if (data) {
-              onDataLoaded(data);
+              onDataLoaded({ ...data, sheetName: firstSheet });
               onConnectionChange(true);
               // Save the correct sheet name
               localStorage.setItem('googleSheetsSheetName', firstSheet);
@@ -440,7 +440,7 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
                           console.log('Data loaded:', data);
                           
                           if (data) {
-                            onDataLoaded(data);
+                            onDataLoaded({ ...data, sheetName: value });
                             // Save new sheet name to localStorage
                             localStorage.setItem('googleSheetsSheetName', value);
                             toast({
