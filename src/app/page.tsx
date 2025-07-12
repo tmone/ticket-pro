@@ -317,9 +317,8 @@ export default function DashboardPage() {
         const wb = XLSX.read(data, { type: "array", cellStyles: true });
         const names = wb.SheetNames;
         
-        // Reset state before processing
-        setWorkbook(null);
-        setSheetNames([]);
+        setWorkbook(wb);
+        setSheetNames(names);
         setActiveSheetName(null);
         setHeaders([]);
         setRows([]);
@@ -335,9 +334,6 @@ export default function DashboardPage() {
             });
             return;
         }
-
-        setWorkbook(wb);
-        setSheetNames(names);
 
         if (names.length === 1) {
             processSheetData(wb, names[0]);
@@ -391,7 +387,19 @@ export default function DashboardPage() {
     }
 
     try {
-        const newWorkbook = JSON.parse(JSON.stringify(workbook));
+        // Create a deep copy of the workbook to avoid direct state mutation.
+        // This is a safer way to handle complex objects in React state.
+        const newWorkbook: WorkBook = {
+            SheetNames: [...workbook.SheetNames],
+            Sheets: {}
+        };
+
+        for (const sheetName of workbook.SheetNames) {
+            // This creates a shallow copy of the sheet object.
+            // For cell-by-cell modification, this is generally safe.
+             newWorkbook.Sheets[sheetName] = {...workbook.Sheets[sheetName]};
+        }
+
         const ws = newWorkbook.Sheets[activeSheetName];
         if (!ws) {
             toast({
@@ -401,7 +409,7 @@ export default function DashboardPage() {
             });
             return;
         }
-
+        
         const dataToExport = rows.map(row => {
             const newRow = {...row};
             if(row.checkedInTime) {
@@ -414,6 +422,8 @@ export default function DashboardPage() {
         });
 
         const newWs = XLSX.utils.json_to_sheet(dataToExport);
+        
+        // Replace the old sheet with the new one in our copied workbook
         newWorkbook.Sheets[activeSheetName] = newWs;
         
         const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
@@ -442,6 +452,7 @@ export default function DashboardPage() {
         });
     }
   };
+
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
@@ -722,3 +733,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
