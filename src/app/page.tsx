@@ -145,7 +145,7 @@ export default function DashboardPage() {
     }
     
     const firstRow = jsonData[0];
-    const extractedHeaders = Object.keys(firstRow);
+    const extractedHeaders = Object.keys(firstRow).filter(h => h !== '__rowNum__');
     
     const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
 
@@ -184,7 +184,7 @@ export default function DashboardPage() {
 
             if (jsonData.length > 0) {
               const firstRow = jsonData[0];
-              const extractedHeaders = Object.keys(firstRow);
+              const extractedHeaders = Object.keys(firstRow).filter(h => h !== '__rowNum__');
               const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
               setHeaders(extractedHeaders);
               setRows(initialRows);
@@ -242,7 +242,8 @@ export default function DashboardPage() {
     if (uniqueCode === lastCheckedInCode) {
       checkInForm.reset();
       if (isContinuous && scanSourceRef.current === 'camera') {
-        startScan();
+        stopScan(); 
+        setTimeout(() => startScan(), 50);
       }
       return; 
     }
@@ -299,7 +300,8 @@ export default function DashboardPage() {
         if (timeSinceCheckIn < 60000) {
             checkInForm.reset();
             if (isContinuous && scanSourceRef.current === 'camera') {
-              startScan();
+              stopScan();
+              setTimeout(() => startScan(), 50);
             }
             return;
         }
@@ -692,3 +694,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
