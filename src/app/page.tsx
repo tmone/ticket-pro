@@ -100,63 +100,6 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const tick = React.useCallback(() => {
-    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-
-        if (ctx) {
-            canvas.height = video.videoHeight;
-            canvas.width = video.videoWidth;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsqr(imageData.data, imageData.width, imageData.height);
-
-            if (code && code.data) {
-              scanSourceRef.current = 'camera';
-              checkInForm.setValue('uniqueCode', code.data);
-              // Directly call handleCheckIn, it will be wrapped in useCallback later
-              handleCheckIn({ uniqueCode: code.data }); 
-              return;
-            }
-        }
-    }
-    if (animationFrameIdRef.current) {
-      animationFrameIdRef.current = requestAnimationFrame(tick);
-    }
-  }, [checkInForm]); // Temporarily remove handleCheckIn from deps
-
-  const startScan = React.useCallback(async () => {
-    setScanError(null);
-    if (isScanning || animationFrameIdRef.current) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await new Promise(resolve => videoRef.current!.onloadedmetadata = resolve);
-        await videoRef.current.play();
-        setIsScanning(true);
-        animationFrameIdRef.current = requestAnimationFrame(tick);
-      }
-    } catch (err) {
-      console.error("Camera access error:", err);
-      setScanError("Camera access denied. Please enable it in your browser settings.");
-      setIsScanning(false);
-    }
-  }, [isScanning, tick]);
-
-  const handleAlertClose = React.useCallback(() => {
-    setIsAlertOpen(false);
-    checkInForm.reset();
-    
-    if (isContinuous && scanSourceRef.current === 'camera') {
-      setTimeout(() => startScan(), 100); 
-    } else if (isContinuous && scanSourceRef.current === 'form') {
-      inputRef.current?.focus();
-    }
-  }, [isContinuous, checkInForm, startScan]);
-
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
     if (!uniqueCode) return;
@@ -240,6 +183,62 @@ export default function DashboardPage() {
     }
   }, [rows, headers, isScanning, stopScan]);
   
+  const tick = React.useCallback(() => {
+    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+        if (ctx) {
+            canvas.height = video.videoHeight;
+            canvas.width = video.videoWidth;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsqr(imageData.data, imageData.width, imageData.height);
+
+            if (code && code.data) {
+              scanSourceRef.current = 'camera';
+              checkInForm.setValue('uniqueCode', code.data);
+              handleCheckIn({ uniqueCode: code.data }); 
+              return;
+            }
+        }
+    }
+    if (animationFrameIdRef.current) {
+      animationFrameIdRef.current = requestAnimationFrame(tick);
+    }
+  }, [checkInForm, handleCheckIn]); 
+
+  const startScan = React.useCallback(async () => {
+    setScanError(null);
+    if (isScanning || animationFrameIdRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await new Promise(resolve => videoRef.current!.onloadedmetadata = resolve);
+        await videoRef.current.play();
+        setIsScanning(true);
+        animationFrameIdRef.current = requestAnimationFrame(tick);
+      }
+    } catch (err) {
+      console.error("Camera access error:", err);
+      setScanError("Camera access denied. Please enable it in your browser settings.");
+      setIsScanning(false);
+    }
+  }, [isScanning, tick]);
+
+  const handleAlertClose = React.useCallback(() => {
+    setIsAlertOpen(false);
+    checkInForm.reset();
+    
+    if (isContinuous && scanSourceRef.current === 'camera') {
+      setTimeout(() => startScan(), 100); 
+    } else if (isContinuous && scanSourceRef.current === 'form') {
+      inputRef.current?.focus();
+    }
+  }, [isContinuous, checkInForm, startScan]);
+
 
   React.useEffect(() => {
     return () => {
@@ -325,12 +324,12 @@ export default function DashboardPage() {
         // Reset state before processing
         setWorkbook(null);
         setSheetNames([]);
+        setActiveSheetName(null);
         setHeaders([]);
         setRows([]);
         setScannedRow(null);
         setHighlightedRowIndex(null);
         rowRefs.current = [];
-        setActiveSheetName(null);
 
         if (names.length === 0) {
             toast({
@@ -338,14 +337,16 @@ export default function DashboardPage() {
                 title: "No Sheets Found",
                 description: "The uploaded Excel file does not contain any sheets.",
             });
+            return;
+        }
+
+        setWorkbook(wb);
+        setSheetNames(names);
+
+        if (names.length === 1) {
+            processSheetData(wb, names[0]);
         } else {
-            setWorkbook(wb);
-            setSheetNames(names);
-            if (names.length === 1) {
-                processSheetData(wb, names[0]);
-            } else {
-                setIsSheetSelectorOpen(true);
-            }
+            setIsSheetSelectorOpen(true);
         }
         
       } catch (error) {
@@ -393,27 +394,29 @@ export default function DashboardPage() {
         return;
     }
 
-    // Create a deep copy of the workbook to avoid modifying the original state directly
-    const newWorkbook = JSON.parse(JSON.stringify(workbook));
+    // Create a safe copy of the workbook to avoid modifying the original state directly
+    const newWorkbook: WorkBook = {
+        SheetNames: [...workbook.SheetNames],
+        Sheets: {}
+    };
+    for (const sheetName of workbook.SheetNames) {
+        // This creates a shallow copy, which is sufficient here
+        newWorkbook.Sheets[sheetName] = {...workbook.Sheets[sheetName]};
+    }
 
     const dataToExport = rows.map(row => {
         const newRow: Record<string, any> = {};
-        // Ensure all original headers are present
         headers.forEach(header => {
             newRow[header] = row[header] ?? '';
         });
-        newRow['Checked-In At'] = row.checkedInTime ? format(row.checkedInTime, 'yyyy-MM-dd HH:mm:ss') : 'N/A';
+        newRow['Checked-In At'] = row.checkedInTime ? format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss') : 'N/A';
         return newRow;
     });
 
-    // Get the original worksheet
-    const worksheet = newWorkbook.Sheets[activeSheetName];
+    const newWorksheet = XLSX.utils.json_to_sheet(dataToExport);
     
-    // Overwrite the sheet with updated data, preserving styles as much as possible
-    XLSX.utils.sheet_add_json(worksheet, dataToExport, {
-        skipHeader: false,
-        origin: 'A1' // Start from the beginning
-    });
+    // Replace the old sheet with the new one
+    newWorkbook.Sheets[activeSheetName] = newWorksheet;
     
     const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
@@ -427,6 +430,7 @@ export default function DashboardPage() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+
     toast({
         title: "Export Successful",
         description: "The updated attendee report has been downloaded."
@@ -712,3 +716,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
