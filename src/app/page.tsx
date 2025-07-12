@@ -249,8 +249,8 @@ export default function DashboardPage() {
     };
   }, [stopScan]);
 
-  const processSheetData = (sheetName: string) => {
-    if (!workbook) {
+  const processSheetData = (wb: WorkBook, sheetName: string) => {
+    if (!wb) {
         toast({
             variant: "destructive",
             title: "Workbook not found",
@@ -259,7 +259,7 @@ export default function DashboardPage() {
         return;
     }
 
-    const worksheet = workbook.Sheets[sheetName];
+    const worksheet = wb.Sheets[sheetName];
     if (!worksheet) {
         toast({
             variant: "destructive",
@@ -318,7 +318,7 @@ export default function DashboardPage() {
         setRows([]);
         
         if (sheetNames.length > 0) {
-            processSheetData(sheetNames[0]);
+            processSheetData(wb, sheetNames[0]);
         } else {
             toast({
                 variant: "destructive",
@@ -349,8 +349,8 @@ export default function DashboardPage() {
   };
   
   const handleSheetSelect = (sheetName: string) => {
-    if (sheetName) {
-        processSheetData(sheetName);
+    if (sheetName && workbook) {
+        processSheetData(workbook, sheetName);
     }
   };
 
@@ -695,3 +695,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
