@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
-import type { WorkBook, WorkSheet } from "xlsx";
+import type { WorkBook, WorkSheet, CellObject } from "xlsx";
 import jsqr from "jsqr";
 
 import { Button } from "@/components/ui/button";
@@ -414,8 +414,15 @@ export default function DashboardPage() {
             if (row.checkedInTime && row.__rowNum__) {
                 const cellAddress = `${checkInColName}${row.__rowNum__}`;
                 const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
-                // This edits the cell directly, preserving all other cells and styles
-                XLSX.utils.sheet_add_aoa(ws, [[cellValue]], { origin: cellAddress });
+                
+                // This is the key part: create a new cell object preserving the old style
+                const existingCell = ws[cellAddress] || {};
+                const newCell: CellObject = {
+                    v: cellValue,
+                    t: 's', // Set type to string
+                    ...(existingCell.s && { s: existingCell.s }) // Preserve existing style
+                };
+                ws[cellAddress] = newCell;
             }
         });
         
@@ -734,4 +741,3 @@ export default function DashboardPage() {
   );
 }
 
-    
