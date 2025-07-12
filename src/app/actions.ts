@@ -7,23 +7,27 @@ const csvToJson = (csv: string): Record<string, any>[] => {
   const lines = csv.split('\n');
   if (lines.length < 1) return [];
 
-  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+  // Remove trailing carriage return from headers if present
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').replace(/\r$/, ''));
   const jsonData = [];
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
     if (!line.trim()) continue;
 
-    // This is a simple regex to handle commas inside quoted strings.
-    // It's not perfect but works for many standard CSVs.
+    // This regex handles commas inside quoted strings.
     const values = line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g) || [];
     
     const row: Record<string, any> = {};
     for (let j = 0; j < headers.length; j++) {
-      const value = (values[j] || '').trim().replace(/"/g, '');
-      row[headers[j]] = value;
+      if (headers[j]) { // Ensure header exists
+          const value = (values[j] || '').trim().replace(/"/g, '').replace(/\r$/, '');
+          row[headers[j]] = value;
+      }
     }
-    jsonData.push(row);
+    if (Object.keys(row).length > 0) {
+      jsonData.push(row);
+    }
   }
 
   return jsonData;
@@ -36,15 +40,20 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
 
   try {
     const url = new URL(sheetUrl);
-    const pathParts = url.pathname.split('/');
-    const sheetId = pathParts[3];
 
-    if (!sheetId) {
-      throw new Error('Invalid Google Sheet URL. Could not find Sheet ID.');
+    // More robustly find the sheet ID, which is usually between /d/ and the next /
+    const match = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(url.pathname);
+    if (!match || !match[1]) {
+      throw new Error('Invalid Google Sheet URL. Could not find a valid Sheet ID.');
     }
-    
-    // Default to the first sheet (gid=0) if not specified
+    const sheetId = match[1];
+
+    // Default to the first sheet (gid=0) if not specified in the hash
     const gid = url.hash.startsWith('#gid=') ? url.hash.substring(5) : '0';
+
+    if (!/^\d+$/.test(gid)) {
+        throw new Error('Invalid GID found in URL. GID must be a number.');
+    }
 
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
 
@@ -57,10 +66,21 @@ export async function fetchGoogleSheetData(sheetUrl: string): Promise<{ data?: R
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch sheet. Status: ${response.status}. Make sure the sheet is public.`);
+      // Provide more specific feedback for common errors
+      if (response.status === 400) {
+          return { error: `Bad Request (400). Please check if the Sheet ID '${sheetId}' and GID '${gid}' are correct and the sheet exists.` };
+      }
+       if (response.status === 404) {
+          return { error: `Not Found (404). The Google Sheet could not be found. Make sure the URL is correct and the sheet is public.` };
+      }
+      throw new Error(`Failed to fetch sheet. Status: ${response.status}. Make sure the sheet is public ("Anyone with the link can view").`);
     }
 
     const csvData = await response.text();
+    if (!csvData) {
+        return { error: 'The Google Sheet appears to be empty or could not be read.' };
+    }
+
     const jsonData = csvToJson(csvData);
 
     return { data: jsonData };
