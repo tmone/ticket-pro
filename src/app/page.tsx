@@ -238,7 +238,8 @@ export default function DashboardPage() {
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
     if (!uniqueCode) return;
-
+    
+    // Check if it's the same code as the last successful check-in
     if (uniqueCode === lastCheckedInCode) {
       checkInForm.reset();
       if (isContinuous && scanSourceRef.current === 'camera') {
@@ -256,37 +257,22 @@ export default function DashboardPage() {
             if (cellValue === undefined || cellValue === null) {
                 return false;
             }
-            
             const lowerCaseCellValue = String(cellValue).trim().toLowerCase();
+            if (lowerCaseCellValue === inputCode) return true;
 
-            // 1. Direct match (case-insensitive)
-            if (lowerCaseCellValue === inputCode) {
-                return true;
-            }
-
-            // 2. Check if cell value is a URL and inputCode is one of its query params
             try {
                 const url = new URL(lowerCaseCellValue);
                 for (const paramValue of url.searchParams.values()) {
-                    if (paramValue.trim().toLowerCase() === inputCode) {
-                        return true;
-                    }
+                    if (paramValue.trim().toLowerCase() === inputCode) return true;
                 }
-            } catch (e) {
-                // Not a URL, ignore
-            }
+            } catch (e) {}
 
-            // 3. Check if inputCode is a URL and cellValue is one of its query params
             try {
                 const url = new URL(inputCode);
-                 for (const paramValue of url.searchParams.values()) {
-                    if (paramValue.trim().toLowerCase() === lowerCaseCellValue) {
-                        return true;
-                    }
+                for (const paramValue of url.searchParams.values()) {
+                    if (paramValue.trim().toLowerCase() === lowerCaseCellValue) return true;
                 }
-            } catch (e) {
-                // Not a URL, ignore
-            }
+            } catch (e) {}
 
             return false;
         });
@@ -295,6 +281,7 @@ export default function DashboardPage() {
     if (rowIndex !== -1) {
       const foundRow = rows[rowIndex];
       
+      // Check if already checked in recently
       if (foundRow.checkedInTime) {
         const timeSinceCheckIn = new Date().getTime() - new Date(foundRow.checkedInTime).getTime();
         if (timeSinceCheckIn < 60000) {
@@ -342,10 +329,11 @@ export default function DashboardPage() {
                 stopScan();
                 scanSourceRef.current = 'camera';
                 checkInForm.setValue("uniqueCode", code.data, { shouldValidate: true });
+                // Use setTimeout to allow state update before submitting
                 setTimeout(() => {
                     checkInForm.handleSubmit(handleCheckIn)();
                 }, 0);
-                return;
+                return; // Stop ticking once a code is found
             }
         }
     }
@@ -421,8 +409,8 @@ export default function DashboardPage() {
       }
     }
     
-    setLastCheckedInCode(null);
-    scanSourceRef.current = null;
+    // Do not reset lastCheckedInCode here to prevent re-scanning the same successful code.
+    // Do not reset scanSourceRef here.
   }, [isContinuous, checkInForm, startScan]);
 
   React.useEffect(() => {
@@ -694,5 +682,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
