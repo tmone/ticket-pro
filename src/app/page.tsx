@@ -59,6 +59,7 @@ export default function DashboardPage() {
   const { toast } = useToast();
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const animationFrameIdRef = React.useRef<number>();
 
   const [session, setSession] = React.useState<SessionData | null>(null);
   const [headers, setHeaders] = React.useState<string[]>([]);
@@ -92,9 +93,12 @@ export default function DashboardPage() {
       }
     });
   }, [router]);
-  
+
   const stopScan = React.useCallback(() => {
     setIsScanning(false);
+    if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+    }
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach((track) => track.stop());
@@ -104,6 +108,7 @@ export default function DashboardPage() {
   
   const startScan = React.useCallback(async () => {
     setScanError(null);
+    if (isScanning) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       if (videoRef.current) {
@@ -116,7 +121,7 @@ export default function DashboardPage() {
       setScanError("Camera access denied. Please enable it in your browser settings.");
       setIsScanning(false);
     }
-  }, []);
+  }, [isScanning]);
 
   React.useEffect(() => {
     // Cleanup camera on component unmount
@@ -132,7 +137,14 @@ export default function DashboardPage() {
 
   const processSheetData = (jsonData: Record<string, any>[]) => {
       if (jsonData.length === 0) {
-        throw new Error("No data found in the Google Sheet.");
+        toast({
+            variant: "destructive",
+            title: "No Data",
+            description: "The sheet is empty or could not be read."
+        });
+        setHeaders([]);
+        setRows([]);
+        return;
       }
       
       const firstRow = jsonData[0];
@@ -158,7 +170,9 @@ export default function DashboardPage() {
       if (result.error) {
         throw new Error(result.error);
       }
-      processSheetData(result.data!);
+      if (result.data) {
+        processSheetData(result.data);
+      }
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -173,16 +187,21 @@ export default function DashboardPage() {
 
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
+    if (!uniqueCode) return;
+    
     let searchCode = uniqueCode.trim();
 
+    // Basic attempt to extract value from a URL-like string
     try {
       const url = new URL(searchCode);
-      const firstParam = url.searchParams.values().next().value;
-      if (firstParam) {
-        searchCode = firstParam.trim();
+      const params = url.searchParams;
+      // Try common parameter names or the first one
+      const potentialCode = params.get('id') || params.get('code') || params.values().next().value;
+      if (potentialCode) {
+        searchCode = potentialCode.trim();
       }
     } catch (e) {
-      // Not a URL, continue with the original code
+      // Not a valid URL, continue with the original code
     }
 
     const rowIndex = rows.findIndex(row =>
@@ -193,24 +212,12 @@ export default function DashboardPage() {
 
     if (rowIndex !== -1) {
       const foundRow = rows[rowIndex];
-      const now = new Date();
       
       if (foundRow.checkedInTime) {
-        const checkedInDate = new Date(foundRow.checkedInTime);
-        const secondsSinceCheckIn = (now.getTime() - checkedInDate.getTime()) / 1000;
-
-        if (secondsSinceCheckIn < 60) {
-          // Within 60s grace period, treat as success
-          setScannedRow(foundRow);
-          setDialogState('success');
-        } else {
-          // After 60s, it's a duplicate
-          setScannedRow(foundRow);
-          setDialogState('duplicate');
-        }
+        setScannedRow(foundRow);
+        setDialogState('duplicate');
       } else {
-        // First time check-in
-        const updatedRow = { ...foundRow, checkedInTime: now };
+        const updatedRow = { ...foundRow, checkedInTime: new Date() };
         const updatedRows = [...rows];
         updatedRows[rowIndex] = updatedRow;
         setRows(updatedRows);
@@ -223,13 +230,14 @@ export default function DashboardPage() {
     }
 
     setIsAlertOpen(true);
-  }, [rows]);
+    if(isScanning) stopScan();
+  }, [rows, isScanning, stopScan]);
 
   const tick = React.useCallback(() => {
     if (isScanning && videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA && canvasRef.current) {
         const video = videoRef.current;
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d");
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
         if (ctx) {
             canvas.height = video.videoHeight;
@@ -241,18 +249,25 @@ export default function DashboardPage() {
             if (code && code.data) {
                 stopScan();
                 checkInForm.setValue("uniqueCode", code.data, { shouldValidate: true });
-                checkInForm.handleSubmit(handleCheckIn)();
-                return;
+                // Use a timeout to ensure state updates before submitting form
+                setTimeout(() => {
+                    checkInForm.handleSubmit(handleCheckIn)();
+                }, 0);
+                return; // Stop the loop
             }
         }
     }
-    requestAnimationFrame(tick);
+    animationFrameIdRef.current = requestAnimationFrame(tick);
   }, [isScanning, stopScan, checkInForm, handleCheckIn]);
 
   React.useEffect(() => {
     if (isScanning) {
-      const animationFrameId = requestAnimationFrame(tick);
-      return () => cancelAnimationFrame(animationFrameId);
+      animationFrameIdRef.current = requestAnimationFrame(tick);
+      return () => {
+          if (animationFrameIdRef.current) {
+            cancelAnimationFrame(animationFrameIdRef.current);
+          }
+      };
     }
   }, [isScanning, tick]);
 
@@ -288,9 +303,6 @@ export default function DashboardPage() {
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    if (link.href) {
-        URL.revokeObjectURL(link.href);
-    }
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     link.setAttribute('download', 'attendee_report.csv');
@@ -298,6 +310,7 @@ export default function DashboardPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     toast({
         title: "Export Successful",
         description: "The attendee report has been downloaded."
@@ -305,27 +318,21 @@ export default function DashboardPage() {
   };
   
   const handleAlertClose = React.useCallback(() => {
-      setIsAlertOpen(false);
-      checkInForm.reset();
-      // If continuous mode is on and we just closed an error/warning dialog, restart scanning.
-      if (isContinuous && (dialogState === 'duplicate' || dialogState === 'not_found')) {
-           // Use a timeout to defer the startScan call, allowing the state to update properly first.
-           setTimeout(() => startScan(), 0);
-      }
-  }, [isContinuous, dialogState, checkInForm, startScan]);
+    setIsAlertOpen(false);
+    checkInForm.reset();
+    if (isContinuous && isScanning === false) {
+      setTimeout(() => startScan(), 100);
+    }
+  }, [isContinuous, checkInForm, startScan, isScanning]);
 
   React.useEffect(() => {
-      // For successful scans in continuous mode, auto-close the dialog and restart scanning.
       if (isContinuous && dialogState === 'success' && isAlertOpen) {
           const timer = setTimeout(() => {
-              setIsAlertOpen(false);
-              checkInForm.reset();
-              startScan();
-          }, 1000); // 1-second delay
-
-          return () => clearTimeout(timer); // Cleanup timer
+              handleAlertClose();
+          }, 1500); // Auto-close success dialog after 1.5s in continuous mode
+          return () => clearTimeout(timer);
       }
-  }, [isAlertOpen, dialogState, isContinuous, startScan, checkInForm]);
+  }, [isAlertOpen, dialogState, isContinuous, handleAlertClose]);
 
 
   if (!session?.isLoggedIn) {
@@ -343,7 +350,7 @@ export default function DashboardPage() {
              {session?.picture && (
                 <div className="flex items-center gap-2 text-sm font-medium">
                     <Avatar className="h-8 w-8">
-                        <AvatarImage src={session.picture} alt={session.name} />
+                        <AvatarImage src={session.picture} alt={session.name || 'User'} />
                         <AvatarFallback><User className="h-4 w-4" /></AvatarFallback>
                     </Avatar>
                     <span className="hidden sm:inline">{session.name}</span>
@@ -434,7 +441,7 @@ export default function DashboardPage() {
                 )}
                 <div className="flex items-center space-x-2 mb-4">
                     <Checkbox id="continuous-scan" checked={isContinuous} onCheckedChange={(checked) => setIsContinuous(!!checked)} />
-                    <Label htmlFor="continuous-scan" className="cursor-pointer">Liên tục</Label>
+                    <Label htmlFor="continuous-scan" className="cursor-pointer">Continuous Scan</Label>
                 </div>
                 <Button type="button" onClick={handleScanButtonClick} className="w-full mb-4" variant="outline">
                     <Camera className="mr-2 h-4 w-4" />

@@ -16,15 +16,15 @@ export async function GET(req: NextRequest) {
     OAUTH2_REDIRECT_URI
   );
 
+  // Request full access to read/write sheets and user profile info
   const scopes = [
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
-    'https://www.googleapis.com/auth/spreadsheets.readonly',
-    // Add 'https://www.googleapis.com/auth/spreadsheets' for write access later
+    'https://www.googleapis.com/auth/spreadsheets' // Changed from .readonly to full access
   ];
 
   const authorizationUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline', // 'offline' gets a refresh token
+    access_type: 'offline', // 'offline' gets a refresh token, important for long-lived sessions
     scope: scopes,
     include_granted_scopes: true,
   });
