@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -262,7 +261,7 @@ export default function DashboardPage() {
   const processSheetData = (wb: WorkBook, sheetName: string) => {
     rowRefs.current = [];
     setHighlightedRowIndex(null);
-    
+
     const worksheet = wb.Sheets[sheetName];
     if (!worksheet) {
         toast({
@@ -285,7 +284,7 @@ export default function DashboardPage() {
       setRows([]);
       return;
     }
-    
+
     const headerSet = new Set<string>();
     jsonData.forEach(row => {
       Object.keys(row).forEach(key => {
@@ -295,7 +294,7 @@ export default function DashboardPage() {
       });
     });
     const extractedHeaders = Array.from(headerSet);
-    
+
     const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
 
     setHeaders(extractedHeaders);
@@ -307,6 +306,7 @@ export default function DashboardPage() {
       description: `Successfully imported ${jsonData.length} rows and ${extractedHeaders.length} columns from sheet: ${sheetName}.`,
     });
   };
+
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -690,5 +690,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
