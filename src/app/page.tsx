@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
-import type { WorkBook, WorkSheet, CellObject } from "xlsx";
+import type { WorkBook, WorkSheet, CellObject, ExcelDataType } from "xlsx";
 import jsqr from "jsqr";
 
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,9 @@ import {
   FileSpreadsheet
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { UniversalExcelHandler } from "@/lib/excel-handler";
+
+// Note: Excel utility functions moved to src/lib/excel-utils.ts for better organization
 
 const checkInSchema = z.object({
   uniqueCode: z.string().min(1, { message: "Code is required." }),
@@ -76,6 +79,7 @@ export default function DashboardPage() {
 
   const [workbook, setWorkbook] = React.useState<WorkBook | null>(null);
   const [originalFileData, setOriginalFileData] = React.useState<Uint8Array | null>(null);
+  const [excelHandler, setExcelHandler] = React.useState<UniversalExcelHandler | null>(null);
   const [sheetNames, setSheetNames] = React.useState<string[]>([]);
   const [activeSheetName, setActiveSheetName] = React.useState<string | null>(null);
   const [isSheetSelectorOpen, setIsSheetSelectorOpen] = React.useState(false);
@@ -86,6 +90,23 @@ export default function DashboardPage() {
     type: string;
     hasFormatting: boolean;
   } | null>(null);
+  const [isClient, setIsClient] = React.useState(false);
+  
+  React.useEffect(() => {
+    setIsClient(true);
+  }, []);
+  
+  // Safe date formatter to prevent hydration mismatch
+  const formatDateSafe = (date: Date | string | null | undefined) => {
+    if (!isClient || !date) return 'N/A';
+    try {
+      const dateObj = typeof date === 'string' ? new Date(date) : date;
+      return format(dateObj, 'PPpp');
+    } catch (error) {
+      console.warn('Error formatting date:', error);
+      return 'N/A';
+    }
+  };
   
   const checkInForm = useForm<z.infer<typeof checkInSchema>>({
     resolver: zodResolver(checkInSchema),
@@ -362,7 +383,7 @@ export default function DashboardPage() {
     }
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -370,29 +391,26 @@ export default function DashboardPage() {
       name: file.name,
       size: (file.size / 1024).toFixed(1) + ' KB',
       type: file.name.split('.').pop()?.toUpperCase() || 'Unknown',
-      hasFormatting: false, 
+      hasFormatting: false, // Will be updated after processing
     });
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         
         // Save raw file data for pristine re-reads during export
         setOriginalFileData(data);
 
-        const wb = XLSX.read(data, {
-            type: "array",
-            cellStyles: true,
-            cellFormulas: true,
-            cellDates: true,
-            cellNF: true,
-            bookVBA: true,
-        });
-        const names = wb.SheetNames;
+        // Create universal handler and process file
+        const handler = new UniversalExcelHandler();
+        const result = await handler.readFile(data);
         
-        setWorkbook(wb);
-        setSheetNames(names);
+        console.log(`Using library: ${result.library}`);
+        console.log(`Advanced formatting detected: ${result.hasFormatting}`);
+        
+        setExcelHandler(handler);
+        setSheetNames(result.sheets);
         setActiveSheetName(null);
         setHeaders([]);
         setRows([]);
@@ -400,13 +418,13 @@ export default function DashboardPage() {
         setHighlightedRowIndex(null);
         rowRefs.current = [];
 
-        // Simple formatting check
+        // Update file info with formatting detection
         setUploadedFileInfo(prev => prev ? {
           ...prev,
-          hasFormatting: wb.Workbook?.Styles?.fonts?.length > 1,
+          hasFormatting: result.hasFormatting,
         } : null);
 
-        if (names.length === 0) {
+        if (result.sheets.length === 0) {
             toast({
                 variant: "destructive",
                 title: "No Sheets Found",
@@ -416,8 +434,16 @@ export default function DashboardPage() {
             return;
         }
 
-        if (names.length === 1) {
-            processSheetData(wb, names[0]);
+        if (result.sheets.length === 1) {
+            const sheetData = handler.processSheetData(result.sheets[0]);
+            setHeaders(sheetData.headers);
+            setRows(sheetData.rows);
+            setActiveSheetName(result.sheets[0]);
+            
+            toast({
+              title: "Success!",
+              description: `File loaded with ${result.library}. Advanced formatting: ${result.hasFormatting ? 'Detected' : 'Basic'}`,
+            });
         } else {
             setIsSheetSelectorOpen(true);
         }
@@ -445,8 +471,16 @@ export default function DashboardPage() {
   };
   
   const handleSheetSelect = (sheetName: string) => {
-    if (sheetName && workbook) {
-        processSheetData(workbook, sheetName);
+    if (sheetName && excelHandler) {
+        const sheetData = excelHandler.processSheetData(sheetName);
+        setHeaders(sheetData.headers);
+        setRows(sheetData.rows);
+        setActiveSheetName(sheetName);
+        
+        toast({
+          title: "Success!",
+          description: `Successfully imported ${sheetData.rows.length} rows from sheet: ${sheetName}.`,
+        });
     }
     setIsSheetSelectorOpen(false);
   };
@@ -459,106 +493,58 @@ export default function DashboardPage() {
     }
   };
 
-  const handleExport = () => {
-    if (!originalFileData || !activeSheetName) {
-        toast({
-            variant: "destructive",
-            title: "No Data Found",
-            description: "Please upload an Excel file first."
-        });
-        return;
+  const handleExport = async () => {
+    if (!excelHandler || !activeSheetName) {
+      toast({
+        variant: "destructive",
+        title: "No Data Found",
+        description: "Please upload an Excel file first."
+      });
+      return;
     }
 
     try {
-        // Re-read the workbook from original data to ensure it's pristine
-        const currentWorkbook = XLSX.read(originalFileData, {
-            type: "array",
-            cellStyles: true,
-            cellFormulas: true,
-            cellDates: true,
-            cellNF: true,
-            bookVBA: true,
-        });
+      console.log('Starting export with enhanced formatting preservation...');
+      
+      // Export with automatic formatting preservation
+      const exportBuffer = await excelHandler.exportWithCheckIns(
+        activeSheetName,
+        rows
+      );
+      
+      // Create and download
+      const blob = new Blob([exportBuffer], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
 
-        const ws = currentWorkbook.Sheets[activeSheetName];
-        if (!ws) {
-            toast({
-              variant: "destructive",
-              title: "Sheet Error",
-              description: `Could not find sheet "${activeSheetName}" in the workbook.`
-            });
-            return;
-        }
-        
-        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
-        const checkInColIndex = range.e.c + 1;
-        const checkInColName = XLSX.utils.encode_col(checkInColIndex);
-        
-        // Add header
-        const headerAddress = `${checkInColName}1`;
-        XLSX.utils.sheet_add_aoa(ws, [['Checked-In At']], { origin: headerAddress });
-        
-        // Update data cells while preserving row formatting
-        rows.forEach(row => {
-            if (row.checkedInTime && row.__rowNum__) {
-                const cellAddress = `${checkInColName}${row.__rowNum__}`;
-                const cellValue = format(new Date(row.checkedInTime), 'yyyy-MM-dd HH:mm:ss');
-                
-                const existingCell = ws[cellAddress];
-                
-                const newCell: CellObject = {
-                    v: cellValue,
-                    t: 's', // Treat as string
-                    z: 'yyyy-mm-dd hh:mm:ss', // Apply date format string
-                    ...(existingCell?.s && { s: existingCell.s }), // Keep existing style
-                };
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'attendee_report_updated.xlsx');
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
 
-                ws[cellAddress] = newCell;
-            }
-        });
-        
-        // Update sheet range
-        if (ws['!ref']) {
-            const newRange = XLSX.utils.decode_range(ws['!ref']);
-            newRange.e.c = Math.max(newRange.e.c, checkInColIndex);
-            ws['!ref'] = XLSX.utils.encode_range(newRange);
-        }
-        
-        const excelBuffer = XLSX.write(currentWorkbook, { 
-            bookType: 'xlsx', 
-            type: 'array', 
-            cellStyles: true,
-            bookVBA: true,
-        });
-        const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
-
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', 'attendee_report_updated.xlsx');
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-
-        toast({
-            title: "Export Successful! ✨",
-            description: "The updated attendee report has been downloaded with all original formatting preserved.",
-        });
+      toast({
+        title: "Export Successful! ✨",
+        description: "The updated attendee report has been downloaded with enhanced formatting preservation.",
+      });
+      
     } catch (error) {
-        console.error("Error exporting Excel file:", error);
-        toast({
-          variant: "destructive",
-          title: "Export Error",
-          description: "Could not export the Excel file.",
-        });
+      console.error("Error exporting Excel file:", error);
+      toast({
+        variant: "destructive",
+        title: "Export Error",
+        description: "Could not export the Excel file: " + (error instanceof Error ? error.message : String(error)),
+      });
     }
   };
 
 
   return (
-    <div className="flex min-h-screen w-full flex-col bg-muted/40">
+    <div className="flex min-h-screen w-full flex-col bg-muted/40" suppressHydrationWarning>
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
         <div className="flex items-center gap-2">
             <TicketCheck className="h-6 w-6 text-primary" />
@@ -767,8 +753,8 @@ export default function DashboardPage() {
                                                 {row.checkedInTime ? "Checked In" : "Pending"}
                                             </Badge>
                                         </TableCell>
-                                        <TableCell>
-                                            {row.checkedInTime ? format(row.checkedInTime, 'PPpp') : 'N/A'}
+                                        <TableCell suppressHydrationWarning>
+                                            {formatDateSafe(row.checkedInTime)}
                                         </TableCell>
                                     </TableRow>
                                 ))
@@ -835,7 +821,7 @@ export default function DashboardPage() {
                 ))}
                 <p>
                   <strong>Checked-in:</strong>{" "}
-                  {scannedRow.checkedInTime ? format(new Date(scannedRow.checkedInTime), 'PPpp') : 'N/A'}
+                  <span suppressHydrationWarning>{formatDateSafe(scannedRow.checkedInTime)}</span>
                 </p>
               </div>
             </>
@@ -858,7 +844,7 @@ export default function DashboardPage() {
                 ))}
                 <p className="mt-2">
                   <strong>Initial Check-in Time:</strong>{" "}
-                  {scannedRow.checkedInTime ? format(new Date(scannedRow.checkedInTime), 'PPpp') : 'N/A'}
+                  <span suppressHydrationWarning>{formatDateSafe(scannedRow.checkedInTime)}</span>
                 </p>
               </div>
             </>
