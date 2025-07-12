@@ -31,16 +31,22 @@ import { Label } from "@/components/ui/label";
 import {
   TicketCheck,
   LogOut,
-  Upload,
+  Link,
   QrCode,
   Download,
   UserCheck,
   AlertTriangle,
   Camera,
+  RefreshCw,
 } from "lucide-react";
+import { fetchGoogleSheetData } from "./actions";
 
 const checkInSchema = z.object({
   uniqueCode: z.string().min(1, { message: "Code is required." }),
+});
+
+const sheetUrlSchema = z.object({
+    url: z.string().url({ message: "Please enter a valid Google Sheet URL." }),
 });
 
 type DialogState = 'success' | 'duplicate' | 'not_found';
@@ -61,10 +67,17 @@ export default function DashboardPage() {
   const [isScanning, setIsScanning] = React.useState(false);
   const [scanError, setScanError] = React.useState<string | null>(null);
   const [isContinuous, setIsContinuous] = React.useState(false);
+  const [googleSheetUrl, setGoogleSheetUrl] = React.useState<string>("");
+  const [isFetching, setIsFetching] = React.useState(false);
 
-  const form = useForm<z.infer<typeof checkInSchema>>({
+  const checkInForm = useForm<z.infer<typeof checkInSchema>>({
     resolver: zodResolver(checkInSchema),
     defaultValues: { uniqueCode: "" },
+  });
+
+  const sheetUrlForm = useForm<z.infer<typeof sheetUrlSchema>>({
+    resolver: zodResolver(sheetUrlSchema),
+    defaultValues: { url: "" },
   });
   
   const stopScan = React.useCallback(() => {
@@ -111,73 +124,46 @@ export default function DashboardPage() {
     router.push("/login");
   };
 
-  const handleDataUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    const fileName = file.name.toLowerCase();
-
-    reader.onload = (e) => {
-      try {
-        const data = e.target?.result;
-        if (!data) {
-          throw new Error("Could not read file.");
-        }
-        
-        if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
-          throw new Error("Unsupported file type. Please upload an Excel file.");
-        }
-
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet);
-
-        if (jsonData.length === 0) {
-            throw new Error("No data found in the Excel file.");
-        }
-        
-        const firstRow = jsonData[0];
-        const extractedHeaders = Object.keys(firstRow);
-        
-        const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
-
-        setHeaders(extractedHeaders);
-        setRows(initialRows);
-        setScannedRow(null);
-
-        toast({
-          title: "Success!",
-          description: `Successfully imported ${jsonData.length} rows.`,
-        });
-      } catch (error: any) {
-        toast({
-          variant: "destructive",
-          title: "Import Failed",
-          description: error.message || "Please check the file format and try again.",
-        });
+  const processSheetData = (jsonData: Record<string, any>[]) => {
+      if (jsonData.length === 0) {
+        throw new Error("No data found in the Google Sheet.");
       }
-    };
-    
-    reader.onerror = () => {
-        toast({
-            variant: "destructive",
-            title: "File Read Error",
-            description: "There was an error reading the file.",
-        });
-    };
+      
+      const firstRow = jsonData[0];
+      const extractedHeaders = Object.keys(firstRow);
+      
+      const initialRows = jsonData.map(row => ({...row, checkedInTime: null}));
 
-    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-      reader.readAsArrayBuffer(file);
-    } else {
-        toast({
-            variant: "destructive",
-            title: "Unsupported File",
-            description: "Please upload an Excel (.xlsx, .xls) file.",
-        });
+      setHeaders(extractedHeaders);
+      setRows(initialRows);
+      setScannedRow(null);
+
+      toast({
+        title: "Success!",
+        description: `Successfully imported ${jsonData.length} rows.`,
+      });
+  };
+
+  const handleGoogleSheetFetch = async (data: z.infer<typeof sheetUrlSchema>) => {
+    setIsFetching(true);
+    setGoogleSheetUrl(data.url);
+    try {
+      const result = await fetchGoogleSheetData(data.url);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      processSheetData(result.data!);
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Import Failed",
+        description: error.message || "Could not fetch or process data. Please check the URL and sheet permissions.",
+      });
+    } finally {
+      setIsFetching(false);
     }
   };
+
 
   const handleCheckIn = React.useCallback((data: z.infer<typeof checkInSchema>) => {
     const { uniqueCode } = data;
@@ -248,14 +234,14 @@ export default function DashboardPage() {
 
             if (code && code.data) {
                 stopScan();
-                form.setValue("uniqueCode", code.data, { shouldValidate: true });
-                form.handleSubmit(handleCheckIn)();
+                checkInForm.setValue("uniqueCode", code.data, { shouldValidate: true });
+                checkInForm.handleSubmit(handleCheckIn)();
                 return;
             }
         }
     }
     requestAnimationFrame(tick);
-  }, [isScanning, stopScan, form, handleCheckIn]);
+  }, [isScanning, stopScan, checkInForm, handleCheckIn]);
 
   React.useEffect(() => {
     if (isScanning) {
@@ -314,26 +300,26 @@ export default function DashboardPage() {
   
   const handleAlertClose = React.useCallback(() => {
       setIsAlertOpen(false);
-      form.reset();
+      checkInForm.reset();
       // If continuous mode is on and we just closed an error/warning dialog, restart scanning.
       if (isContinuous && (dialogState === 'duplicate' || dialogState === 'not_found')) {
            // Use a timeout to defer the startScan call, allowing the state to update properly first.
            setTimeout(() => startScan(), 0);
       }
-  }, [isContinuous, dialogState, form, startScan]);
+  }, [isContinuous, dialogState, checkInForm, startScan]);
 
   React.useEffect(() => {
       // For successful scans in continuous mode, auto-close the dialog and restart scanning.
       if (isContinuous && dialogState === 'success' && isAlertOpen) {
           const timer = setTimeout(() => {
               setIsAlertOpen(false);
-              form.reset();
+              checkInForm.reset();
               startScan();
           }, 1000); // 1-second delay
 
           return () => clearTimeout(timer); // Cleanup timer
       }
-  }, [isAlertOpen, dialogState, isContinuous, startScan, form]);
+  }, [isAlertOpen, dialogState, isContinuous, startScan, checkInForm]);
 
 
   if (!isAuthenticated) {
@@ -362,11 +348,33 @@ export default function DashboardPage() {
           <div className="grid auto-rows-max items-start gap-4 md:gap-8 lg:col-span-1">
             <Card>
               <CardHeader>
-                <CardTitle>Upload Data</CardTitle>
-                <CardDescription>Upload an Excel file. The first row should contain headers.</CardDescription>
+                <CardTitle>Google Sheet Data</CardTitle>
+                <CardDescription>
+                    Paste the URL of a public Google Sheet. Make sure it's shared with "Anyone with the link".
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <Input id="data-upload" type="file" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleDataUpload} />
+                <Form {...sheetUrlForm}>
+                    <form onSubmit={sheetUrlForm.handleSubmit(handleGoogleSheetFetch)} className="space-y-4">
+                        <FormField
+                            control={sheetUrlForm.control}
+                            name="url"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Sheet URL</FormLabel>
+                                    <FormControl>
+                                        <Input placeholder="https://docs.google.com/spreadsheets/d/..." {...field} />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                        <Button type="submit" className="w-full" disabled={isFetching}>
+                           {isFetching ? <RefreshCw className="mr-2 h-4 w-4 animate-spin"/> : <Link className="mr-2 h-4 w-4" />}
+                           {isFetching ? 'Fetching Data...' : 'Load Data from Sheet'}
+                        </Button>
+                    </form>
+                </Form>
               </CardContent>
             </Card>
             <Card>
@@ -416,10 +424,10 @@ export default function DashboardPage() {
                     <Camera className="mr-2 h-4 w-4" />
                     {isScanning ? 'Stop Camera' : 'Scan QR Code'}
                 </Button>
-                <Form {...form}>
-                    <form onSubmit={form.handleSubmit(handleCheckIn)} className="space-y-4">
+                <Form {...checkInForm}>
+                    <form onSubmit={checkInForm.handleSubmit(handleCheckIn)} className="space-y-4">
                         <FormField
-                            control={form.control}
+                            control={checkInForm.control}
                             name="uniqueCode"
                             render={({ field }) => (
                                 <FormItem>
@@ -477,7 +485,7 @@ export default function DashboardPage() {
                             ) : (
                                 <TableRow>
                                     <TableCell colSpan={headers.length > 0 ? headers.length + 2 : 1} className="h-24 text-center">
-                                        No data uploaded yet.
+                                        No data loaded yet. Please provide a Google Sheet URL.
                                     </TableCell>
                                 </TableRow>
                             )}
