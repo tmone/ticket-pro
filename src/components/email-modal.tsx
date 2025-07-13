@@ -30,6 +30,26 @@ export function EmailModal({ open, onOpenChange, onSuccess, selectedEmails, spre
   const [senderEmail, setSenderEmail] = React.useState("");
   const [senderName, setSenderName] = React.useState("");
   const [bccList, setBccList] = React.useState<string[]>([]);
+  const [attachTicket, setAttachTicket] = React.useState(true);
+  const [appendTicketInline, setAppendTicketInline] = React.useState(false);
+  const [isSending, setIsSending] = React.useState(false);
+  const [sendingProgress, setSendingProgress] = React.useState({ current: 0, total: 0 });
+  const [isTesting, setIsTesting] = React.useState(false);
+  const [showResendWarning, setShowResendWarning] = React.useState(false);
+  const [previouslySentEmails, setPreviouslySentEmails] = React.useState<string[]>([]);
+  const [isSaving, setIsSaving] = React.useState(false);
+  
+  // Handle dialog close
+  const handleClose = React.useCallback((newOpen: boolean) => {
+    if (!newOpen) {
+      // Reset any pending states when closing
+      setShowResendWarning(false);
+      setIsSending(false);
+      setIsTesting(false);
+      setIsSaving(false);
+    }
+    onOpenChange(newOpen);
+  }, [onOpenChange]);
 
   // Load email template and sender info from server on mount
   React.useEffect(() => {
@@ -58,14 +78,6 @@ export function EmailModal({ open, onOpenChange, onSuccess, selectedEmails, spre
       loadEmailTemplate();
     }
   }, [open]);
-  const [attachTicket, setAttachTicket] = React.useState(true);
-  const [appendTicketInline, setAppendTicketInline] = React.useState(false);
-  const [isSending, setIsSending] = React.useState(false);
-  const [sendingProgress, setSendingProgress] = React.useState({ current: 0, total: 0 });
-  const [isTesting, setIsTesting] = React.useState(false);
-  const [showResendWarning, setShowResendWarning] = React.useState(false);
-  const [previouslySentEmails, setPreviouslySentEmails] = React.useState<string[]>([]);
-  const [isSaving, setIsSaving] = React.useState(false);
 
   // Check for previously sent emails
   React.useEffect(() => {
@@ -146,7 +158,7 @@ export function EmailModal({ open, onOpenChange, onSuccess, selectedEmails, spre
         if (onSuccess) {
           onSuccess();
         }
-        onOpenChange(false);
+        handleClose(false);
       } else {
         const error = await response.json();
         throw new Error(error.error || 'Failed to send emails');
@@ -246,7 +258,7 @@ export function EmailModal({ open, onOpenChange, onSuccess, selectedEmails, spre
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-auto">
           <DialogHeader>
             <DialogTitle>Send Emails</DialogTitle>
@@ -378,7 +390,7 @@ export function EmailModal({ open, onOpenChange, onSuccess, selectedEmails, spre
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                onClick={() => onOpenChange(false)}
+                onClick={() => handleClose(false)}
                 disabled={isSending}
               >
                 Cancel
@@ -404,7 +416,7 @@ export function EmailModal({ open, onOpenChange, onSuccess, selectedEmails, spre
               </Button>
             </div>
           </div>
-          </div>
+        </div>
         </DialogContent>
       </Dialog>
 

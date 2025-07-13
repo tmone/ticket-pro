@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "ticketcheck-pro",
+  "private_key_id": "c06d14d959c0c55561cbcecdc3cf1b170c4d0120",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDnJ5L7jTcWr+pO\nfGZCubXZikS5O+49E6nqMiOYFU7N5tsl84X9gL+Hjf98s9/yUsI5OhxNTSXa3MdT\nLNcg8/d0gKybJznoI2TEB2q3z9Jt8Ahj9BGfxVfs5O1V31uY+jjXTRgS2kXTzvHe\nOooem0P1fDFcfiMIYNpc7Yp3VwPnJGrKx4eKEZ53y1iDXw74olGwvM/b2pWaVlyQ\nPh4pmpCXq8MyiOCsWPnriMZ8FyRMGf2CH5TkpOWKEFFVEDMGzlBH/96TPvZopjrO\nBt0z0Cnc83g+4AVewS7evMbITa87Nkf7Mp+vWX9mEOwm5bcmSj3gl3gYxiOpY3UE\nrC1yvGYrAgMBAAECggEAbRUI0LrIR2WGrbkYzN40ic8tNTip6Zqw8XrtvyQ3BwWt\nX1B3Z7TtLXv+GAwOX51cWIMqvfPtLEZJrd+YOc3HdewPCDzPn9OsBrH1U364L/c5\nDmosMvh+0KULtx1rbVqPnlKcTLFCiHy9OQDpEx50SJFt/dbsk1SZV4clc8HVbqqk\nHBiZIvHRj2ItlEhQg+UJ7Asi0hh5kJwHKaQ19O3hoyIG+F95l0VuGfpF2QDlvtkM\neqGb9RjHMH1/0HrWuq51LiZU2hkDzGo0gKJOqKb4vyaNk2W0ts1mL9BAhuEI4Qjc\nOMeucijh7S0sA+s/GpVeu9L9f2POYd7+r2fHKXh74QKBgQD7xrYwpv5zBRYlOr7E\nl+DxtBQibPsap62+f5YXO3eEns1LwkDSmRHRfsjtJZDEM+xZq1zqyOd0OL/FQwJq\nA5pIG4vZQe880FUDyPZhGQhxP4QdxI0vIJO43VI48p2CQFHVeJz6qlOtWQVepG7I\n0NtYAEMncWfla/tThpDvrGGFuwKBgQDrCEzLkB4Zpk/w9+d+6fOHuhDCtnitAoWW\ntYRx91WoylO73ahMZi1x2gSx4oZ8LI0RueM3GjgY3Id3WhrFXbd/Snrdxa2tFYPo\nSPVflJqhR4+lfU0ZgImualKFf4W/OBUNDhhlIGCZiiJ/H1rvpJqmhssWSRvs24ve\nZDO8+VbiUQKBgFa6MWH69CVMuD8kyDfSFWNM466kGa8p2ViIfHwOOPJO/Wq+RDQH\nFDM02COQUBi1xhFxTPV3NPs83RonJfq8uPVjv72bz7wEC3TdUblKtTTFa04RuYxl\nTV1dp4gEUqteWpINFQ3nhCFvS8E5JQw5nYTnujoo/1/w3Ub9UImuuH0nAoGAfrWm\n0UgNMj7bckn0YBO42z+Qsai2Pm/RnYKWuOpjH/CUXAAQL8AWV/718QDzCBbsptXU\njWxxOdYKomnNbQItX07EFrPwAhRLXPuYbcMr6i8uXkXDPzBxCbsAakBp1sFhd/xV\nYo+mBKDYIDjDSdcwGP8qlgUsLPHf4jGbQxIZqUECgYEAhLnAJpHVJWu3dyU7fKZj\nvbzL/tAmHtumoaSK42/+7FTkdrqzKcQaEeupC8jXNi9VyG1QgMn4e+TNergvWpyh\nLhKrwntOa8qq9RtNHUZzX8rgpq7AKAzC8PPk59O9LZXJSll3RcFFTHrmE75uHnAc\nAZRce6FFNoVjKFhTxNJfKF4=\n-----END PRIVATE KEY-----\n",
+  "client_email": "ticketcheck-sheets@ticketcheck-pro.iam.gserviceaccount.com",
+  "client_id": "116361320419079219384",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/ticketcheck-sheets%40ticketcheck-pro.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
