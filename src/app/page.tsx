@@ -7,8 +7,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkBook, WorkSheet, CellObject, ExcelDataType } from "xlsx";
+import { getRedirectUrl } from "@/config/checkin-redirects";
 import jsqr from "jsqr";
 
 import { Button } from "@/components/ui/button";
@@ -73,6 +74,7 @@ type DialogState = 'success' | 'duplicate' | 'not_found';
 export default function DashboardPage() {
   const { toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -127,6 +129,16 @@ export default function DashboardPage() {
   React.useEffect(() => {
     setIsClient(true);
     
+    // Check for code parameter and redirect if needed
+    const code = searchParams.get('code');
+    if (code) {
+      const redirectUrl = getRedirectUrl(code);
+      if (redirectUrl) {
+        window.location.href = redirectUrl;
+        return;
+      }
+    }
+    
     // Load saved QR code column from localStorage
     const savedQrCodeColumn = localStorage.getItem('qrCodeColumn');
     if (savedQrCodeColumn) {
@@ -138,7 +150,7 @@ export default function DashboardPage() {
     if (savedEmailColumn) {
       setEmailColumn(savedEmailColumn);
     }
-  }, []);
+  }, [searchParams]);
   
   // Safe date formatter to prevent hydration mismatch
   const formatDateSafe = (date: Date | string | null | undefined) => {
