@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     // Get all data from the sheet
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${sheetName}!A:ZZ`, // Get all columns
+      range: sheetName, // Get all columns
     });
 
     const rows = response.data.values;

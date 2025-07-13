@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     // Read data from sheet
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${sheetName}!A:ZZ`,
+      range: sheetName,
     });
 
     const values = response.data.values || [];
