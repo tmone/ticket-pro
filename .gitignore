@@ -42,4 +42,6 @@ next-env.d.ts
 
 # firebase
 firebase-debug.log
-firestore-debug.logticketcheck-pro-c06d14d959c0.json
+firestore-debug.log
+ticketcheck-pro-c06d14d959c0.json
+*-c06d14d959c0.json
