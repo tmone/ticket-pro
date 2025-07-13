@@ -41,13 +41,19 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
     return 'Sheet1';
   };
   
-  const [spreadsheetUrl, setSpreadsheetUrl] = React.useState(getInitialUrl());
-  const [sheetName, setSheetName] = React.useState(getInitialSheetName());
+  const [spreadsheetUrl, setSpreadsheetUrl] = React.useState('');
+  const [sheetName, setSheetName] = React.useState('Sheet1');
   const [isConnecting, setIsConnecting] = React.useState(false);
   const [hasAutoConnected, setHasAutoConnected] = React.useState(false);
   const [isCollapsed, setIsCollapsed] = React.useState(false);
   
   const { state, connectToSheets, loadAttendeeData, disconnect } = googleSheetsApi;
+
+  // Set initial values after mount to avoid hydration issues
+  React.useEffect(() => {
+    setSpreadsheetUrl(getInitialUrl());
+    setSheetName(getInitialSheetName());
+  }, []);
 
   // Extract spreadsheet ID from Google Sheets URL
   const extractSpreadsheetId = (url: string): string | null => {
@@ -221,7 +227,7 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
                 placeholder="https://docs.google.com/spreadsheets/d/your-sheet-id/edit"
                 value={spreadsheetUrl}
                 onChange={(e) => setSpreadsheetUrl(e.target.value)}
-                disabled={isConnecting}
+                disabled={Boolean(isConnecting)}
               />
               <p className="text-xs text-muted-foreground">
                 Paste the full URL of your Google Sheets document
@@ -235,7 +241,7 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
                 placeholder="Sheet1"
                 value={sheetName}
                 onChange={(e) => setSheetName(e.target.value)}
-                disabled={isConnecting}
+                disabled={Boolean(isConnecting)}
               />
               <p className="text-xs text-muted-foreground">
                 Leave empty to use the first sheet
@@ -244,7 +250,7 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
 
             <Button 
               onClick={handleConnect} 
-              disabled={!spreadsheetUrl.trim() || isConnecting || state.isLoading}
+              disabled={Boolean(!spreadsheetUrl.trim() || isConnecting || state.isLoading)}
               className="w-full"
             >
               {isConnecting || state.isLoading ? (
@@ -462,7 +468,7 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
                         }
                       }
                     }}
-                    disabled={isConnecting || state.isLoading}
+                    disabled={Boolean(isConnecting || state.isLoading)}
                   >
                     <SelectTrigger id="sheet-select">
                       {isConnecting ? (
@@ -489,7 +495,7 @@ export function GoogleSheetsConnector({ onDataLoaded, onConnectionChange, google
             <div className="flex gap-2">
               <Button 
                 onClick={handleRefreshData} 
-                disabled={state.isLoading}
+                disabled={Boolean(state.isLoading)}
                 variant="outline"
                 size="sm"
               >
