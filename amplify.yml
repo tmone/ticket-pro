@@ -1,0 +1,32 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - npm ci --cache .npm --prefer-offline
+    build:
+      commands:
+        - |
+          cat > .env.production << EOF
+          GOOGLE_SERVICE_ACCOUNT_EMAIL=$GOOGLE_SERVICE_ACCOUNT_EMAIL
+          GOOGLE_PRIVATE_KEY="$GOOGLE_PRIVATE_KEY"
+          GOOGLE_REDIRECT_URI=$GOOGLE_REDIRECT_URI
+          NEXT_PUBLIC_DEFAULT_GOOGLE_SHEETS_URL=$NEXT_PUBLIC_DEFAULT_GOOGLE_SHEETS_URL
+          ADMIN_PASSWORD=$ADMIN_PASSWORD
+          EMAIL_SERVER=$EMAIL_SERVER
+          EMAIL_USER=$EMAIL_USER
+          EMAIL_APP_PASSWORD=$EMAIL_APP_PASSWORD
+          SENDER_NAME=$SENDER_NAME
+          SENDER_EMAIL=$SENDER_EMAIL
+          SENDER_BCC=$SENDER_BCC
+          CONTACT_PHONE=$CONTACT_PHONE
+          EOF
+        - npm run build
+  artifacts:
+    baseDirectory: .next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - .next/cache/**/*
+      - .npm/**/*
