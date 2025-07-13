@@ -22,6 +22,7 @@ frontend:
           GOOGLE_PRIVATE_KEY="${GOOGLE_PRIVATE_KEY}"
           ENDOFFILE
         - npm run build
+        - echo "PORT=9898" >> .env.production
   artifacts:
     baseDirectory: .next
     files:
