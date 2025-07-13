@@ -293,7 +293,7 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    const svgTemplate = attachTicket ? fs.readFileSync(path.join(process.cwd(), 'public', 'ticket.svg'), 'utf-8') : null;
+    const svgTemplate = (attachTicket || appendTicketInline) ? fs.readFileSync(path.join(process.cwd(), 'public', 'ticket.svg'), 'utf-8') : null;
     
     // Load email template
     const emailTemplatePath = path.join(process.cwd(), 'public', 'templates', 'email.eml');
@@ -355,8 +355,16 @@ export async function POST(request: NextRequest) {
         }
         let attachments = [];
         let jpgBuffer: Buffer | null = null;
+        
+        console.log('Ticket generation check:', {
+          attachTicket,
+          appendTicketInline,
+          hasTemplate: !!svgTemplate,
+          hasQrData: !!emailData.qrData,
+          shouldGenerate: (attachTicket || appendTicketInline) && svgTemplate && emailData.qrData
+        });
 
-        if (attachTicket && svgTemplate && emailData.qrData) {
+        if ((attachTicket || appendTicketInline) && svgTemplate && emailData.qrData) {
           // Generate QR code and ticket
           const qrSvgContent = await QRCode.toString(emailData.qrData, {
             type: 'svg',
@@ -397,10 +405,26 @@ export async function POST(request: NextRequest) {
             })
             .toBuffer();
 
-          attachments.push({
+          // Create attachment
+          const attachment: any = {
             filename: `ticket-${emailData.rowNumber}.jpg`,
             content: jpgBuffer,
             contentType: 'image/jpeg'
+          };
+          
+          // If appendTicketInline, add CID for inline display
+          if (appendTicketInline) {
+            attachment.cid = `ticket-${emailData.rowNumber}`;
+            attachment.contentDisposition = 'inline';
+          }
+          
+          attachments.push(attachment);
+          console.log('Created attachment:', {
+            filename: attachment.filename,
+            hasContent: !!attachment.content,
+            contentLength: attachment.content?.length,
+            cid: attachment.cid,
+            contentDisposition: attachment.contentDisposition
           });
         }
 
@@ -445,14 +469,9 @@ export async function POST(request: NextRequest) {
         let htmlContent = personalizedMessage.replace(/\n/g, '<br>');
         
         // If appendTicketInline is true, add the image as inline at the bottom
-        if (appendTicketInline && attachTicket && jpgBuffer) {
+        if (appendTicketInline && jpgBuffer) {
           // Add the image inline at the bottom with 100% width
-          htmlContent += `<br><br><img src="cid:ticket-${emailData.rowNumber}" style="width: 100%; max-width: 800px; height: auto;" alt="Event Ticket" />`;
-          
-          // Update attachment to include CID for inline display
-          if (attachments.length > 0) {
-            attachments[0].cid = `ticket-${emailData.rowNumber}`;
-          }
+          htmlContent += `<br><br><img src="cid:ticket-${emailData.rowNumber}" style="width: 100%; max-width: 800px; height: auto; display: block; margin: 0 auto;" alt="Event Ticket" />`;
         }
 
         const mailOptions = {
@@ -464,6 +483,14 @@ export async function POST(request: NextRequest) {
           html: htmlContent,
           attachments: attachments
         };
+        
+        console.log('Mail options:', {
+          to: emailData.email,
+          hasAttachments: attachments.length > 0,
+          attachmentCount: attachments.length,
+          htmlContainsImage: htmlContent.includes('<img'),
+          appendTicketInline
+        });
 
         await transporter.sendMail(mailOptions);
         successCount++;
