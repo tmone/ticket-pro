@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Send, Loader2, TestTube } from "lucide-react";
+import { Send, Loader2, TestTube, Save } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { RichTextEditor } from "@/components/rich-text-editor";
 
 interface EmailModalProps {
   open: boolean;
@@ -47,12 +48,9 @@ export function EmailModal({ open, onOpenChange, onSuccess, selectedEmails, spre
         console.error('Failed to load email template:', error);
         // Set fallback values
         setSubject('Your Event Ticket');
-        setMessage(`Dear {name},
-
-Thank you for registering for our event. Please find your ticket attached.
-
-Best regards,
-Event Team`);
+        setMessage(`<p>Dear {name},</p>
+<p>Thank you for registering for our event. Please find your ticket attached.</p>
+<p>Best regards,<br>Event Team</p>`);
       }
     };
     
@@ -63,9 +61,11 @@ Event Team`);
   const [attachTicket, setAttachTicket] = React.useState(true);
   const [appendTicketInline, setAppendTicketInline] = React.useState(false);
   const [isSending, setIsSending] = React.useState(false);
+  const [sendingProgress, setSendingProgress] = React.useState({ current: 0, total: 0 });
   const [isTesting, setIsTesting] = React.useState(false);
   const [showResendWarning, setShowResendWarning] = React.useState(false);
   const [previouslySentEmails, setPreviouslySentEmails] = React.useState<string[]>([]);
+  const [isSaving, setIsSaving] = React.useState(false);
 
   // Check for previously sent emails
   React.useEffect(() => {
@@ -208,18 +208,54 @@ Event Team`);
     }
   };
 
+  const handleSaveTemplate = async () => {
+    setIsSaving(true);
+
+    try {
+      const response = await fetch('/api/save-email-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject,
+          message,
+          senderEmail,
+          senderName,
+        }),
+      });
+
+      if (response.ok) {
+        toast({
+          title: "Template Saved!",
+          description: "Email template has been saved successfully.",
+        });
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to save template');
+      }
+    } catch (error) {
+      console.error('Save template error:', error);
+      toast({
+        title: "Save Failed",
+        description: error instanceof Error ? error.message : "Failed to save template",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-auto">
           <DialogHeader>
-            <DialogTitle>Send Emails to Selected Recipients</DialogTitle>
+            <DialogTitle>Send Emails</DialogTitle>
+            <div className="text-sm text-muted-foreground mt-1">
+              {selectedEmails.length} recipient{selectedEmails.length !== 1 ? 's' : ''} selected
+            </div>
           </DialogHeader>
         
         <div className="space-y-4">
-          <div className="text-sm text-muted-foreground">
-            Sending to {selectedEmails.length} recipients
-          </div>
           
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -258,9 +294,6 @@ Event Team`);
                   )}
                 </Button>
               </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                Click test button to verify email configuration
-              </div>
             </div>
           </div>
           
@@ -277,19 +310,12 @@ Event Team`);
           
           <div>
             <Label htmlFor="message">Message *</Label>
-            <Textarea
-              id="message"
+            <RichTextEditor
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={setMessage}
               placeholder="Email message body"
-              rows={8}
-              required
-              className="resize-none"
+              headers={headers}
             />
-            <div className="text-xs text-muted-foreground mt-1">
-              Available placeholders: {headers && headers.length > 0 ? headers.map(h => `{${h}}`).join(', ') : 'Loading...'}<br/>
-              System placeholders: {"{senderName}"}, {"{senderEmail}"}, {"{ticketCode}"}, {"{eventDate}"}
-            </div>
           </div>
           
           <div className="space-y-2">
@@ -316,26 +342,6 @@ Event Team`);
             </div>
           </div>
           
-          <div className="bg-muted p-3 rounded-lg">
-            <div className="text-sm font-medium mb-2">Preview Recipients:</div>
-            <div className="max-h-32 overflow-auto space-y-1">
-              {selectedEmails.slice(0, 5).map((recipient, index) => (
-                <div key={index} className="text-xs">
-                  {recipient.name ? `${recipient.name} (${recipient.email})` : recipient.email}
-                </div>
-              ))}
-              {selectedEmails.length > 5 && (
-                <div className="text-xs text-muted-foreground">
-                  ... and {selectedEmails.length - 5} more
-                </div>
-              )}
-              {bccList.length > 0 && (
-                <div className="text-xs text-muted-foreground mt-2 pt-2 border-t">
-                  <strong>BCC:</strong> {bccList.join(', ')}
-                </div>
-              )}
-            </div>
-          </div>
           
           {previouslySentEmails.length > 0 && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
@@ -348,31 +354,55 @@ Event Team`);
               </div>
             </div>
           )}
+          
 
-          <div className="flex gap-2 justify-end">
+          <div className="flex gap-2 justify-between">
             <Button
               variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isSending}
+              onClick={handleSaveTemplate}
+              disabled={isSending || isSaving}
             >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => handleSendEmails(false)}
-              disabled={isSending}
-            >
-              {isSending ? (
+              {isSaving ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Sending...
+                  Saving...
                 </>
               ) : (
                 <>
-                  <Send className="mr-2 h-4 w-4" />
-                  Send Emails
+                  <Save className="mr-2 h-4 w-4" />
+                  Save Template
                 </>
               )}
             </Button>
+            
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={isSending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => handleSendEmails(false)}
+                disabled={isSending}
+              >
+                {isSending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {sendingProgress.current > 0 
+                      ? `Sending... (${sendingProgress.current}/${sendingProgress.total})`
+                      : 'Sending...'
+                    }
+                  </>
+                ) : (
+                  <>
+                    <Send className="mr-2 h-4 w-4" />
+                    Send Emails
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
           </div>
         </DialogContent>

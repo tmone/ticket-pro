@@ -346,8 +346,24 @@ export async function POST(request: NextRequest) {
       return emailRegex.test(email);
     };
 
+    // Helper function to delay between emails
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    
     // Send emails one by one to avoid rate limiting
-    for (const emailData of emails) {
+    for (let i = 0; i < emails.length; i++) {
+      const emailData = emails[i];
+      
+      // Add delay between emails (except for the first one)
+      if (i > 0) {
+        // Progressive delay: 1-2 seconds for first 10, 2-3 seconds for next 10, etc.
+        const baseDelay = Math.min(Math.floor(i / 10) + 1, 5) * 1000; // Max 5 seconds
+        const randomDelay = Math.random() * 1000; // 0-1 second random
+        const totalDelay = baseDelay + randomDelay;
+        
+        console.log(`Delaying ${totalDelay}ms before sending email ${i + 1}/${emails.length}`);
+        await delay(totalDelay);
+      }
+      
       try {
         // Validate email address first
         if (!validateEmail(emailData.email)) {
@@ -466,7 +482,12 @@ export async function POST(request: NextRequest) {
         const personalizedSubject = replacePlaceholders(subject);
         
         // Prepare HTML content
-        let htmlContent = personalizedMessage.replace(/\n/g, '<br>');
+        // Check if message is already HTML (from rich text editor)
+        let htmlContent = personalizedMessage;
+        if (!personalizedMessage.includes('<') || !personalizedMessage.includes('>')) {
+          // Plain text - convert newlines to <br>
+          htmlContent = personalizedMessage.replace(/\n/g, '<br>');
+        }
         
         // If appendTicketInline is true, add the image as inline at the bottom
         if (appendTicketInline && jpgBuffer) {
@@ -494,7 +515,7 @@ export async function POST(request: NextRequest) {
 
         await transporter.sendMail(mailOptions);
         successCount++;
-        console.log(`Email sent successfully to ${emailData.email}`);
+        console.log(`Email sent successfully to ${emailData.email} (${i + 1}/${emails.length})`);
         
         // Track successful email for Google Sheets update
         if (emailData.originalRowIndex !== undefined) {

@@ -1420,25 +1420,25 @@ export default function DashboardPage() {
                 ? `All ${resendConfirmData.previouslySent.length} selected recipients have already received emails.`
                 : `${resendConfirmData.previouslySent.length} out of ${resendConfirmData.totalSelected} selected recipients have already received emails:`
               }
-              
-              {resendConfirmData.previouslySent.length > 0 && resendConfirmData.previouslySent.length !== resendConfirmData.totalSelected && (
-                <div className="mt-2 max-h-32 overflow-auto bg-muted p-2 rounded">
-                  {resendConfirmData.previouslySent.slice(0, 10).map((email, index) => (
-                    <div key={index} className="text-xs">{email}</div>
-                  ))}
-                  {resendConfirmData.previouslySent.length > 10 && (
-                    <div className="text-xs text-muted-foreground">... and {resendConfirmData.previouslySent.length - 10} more</div>
-                  )}
-                </div>
-              )}
-              
-              <div className="mt-3 font-semibold">
-                Do you want to proceed and send emails to all selected recipients?
-              </div>
-              <div className="text-sm text-muted-foreground">
-                This may be considered spam by recipients who already received the email.
-              </div>
             </AlertDialogDescription>
+            
+            {resendConfirmData.previouslySent.length > 0 && resendConfirmData.previouslySent.length !== resendConfirmData.totalSelected && (
+              <div className="mt-2 max-h-32 overflow-auto bg-muted p-2 rounded">
+                {resendConfirmData.previouslySent.slice(0, 10).map((email, index) => (
+                  <div key={index} className="text-xs">{email}</div>
+                ))}
+                {resendConfirmData.previouslySent.length > 10 && (
+                  <div className="text-xs text-muted-foreground">... and {resendConfirmData.previouslySent.length - 10} more</div>
+                )}
+              </div>
+            )}
+            
+            <div className="mt-3 font-semibold">
+              Do you want to proceed and send emails to all selected recipients?
+            </div>
+            <div className="text-sm text-muted-foreground">
+              This may be considered spam by recipients who already received the email.
+            </div>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel
@@ -1468,27 +1468,27 @@ export default function DashboardPage() {
             <AlertDialogTitle>⚠️ Invalid Data Warning</AlertDialogTitle>
             <AlertDialogDescription>
               {invalidDataInfo.invalidRows.length} out of {invalidDataInfo.invalidRows.length + invalidDataInfo.validCount} selected rows have invalid data:
-              
-              <div className="mt-2 max-h-32 overflow-auto bg-muted p-2 rounded">
-                {invalidDataInfo.invalidRows.slice(0, 10).map(({ index, reason }) => (
-                  <div key={index} className="text-xs">
-                    Row {index}: {reason}
-                  </div>
-                ))}
-                {invalidDataInfo.invalidRows.length > 10 && (
-                  <div className="text-xs text-muted-foreground">
-                    ... and {invalidDataInfo.invalidRows.length - 10} more
-                  </div>
-                )}
-              </div>
-              
-              <div className="mt-3 font-semibold">
-                Do you want to proceed with sending emails to the {invalidDataInfo.validCount} valid recipients only?
-              </div>
-              <div className="text-sm text-muted-foreground">
-                Rows with empty emails or QR codes will be skipped.
-              </div>
             </AlertDialogDescription>
+            
+            <div className="mt-2 max-h-32 overflow-auto bg-muted p-2 rounded">
+              {invalidDataInfo.invalidRows.slice(0, 10).map(({ index, reason }) => (
+                <div key={index} className="text-xs">
+                  Row {index}: {reason}
+                </div>
+              ))}
+              {invalidDataInfo.invalidRows.length > 10 && (
+                <div className="text-xs text-muted-foreground">
+                  ... and {invalidDataInfo.invalidRows.length - 10} more
+                </div>
+              )}
+            </div>
+            
+            <div className="mt-3 font-semibold">
+              Do you want to proceed with sending emails to the {invalidDataInfo.validCount} valid recipients only?
+            </div>
+            <div className="text-sm text-muted-foreground">
+              Rows with empty emails or QR codes will be skipped.
+            </div>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel

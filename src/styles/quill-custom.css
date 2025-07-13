@@ -1,0 +1,67 @@
+/* Custom Quill styles */
+.ql-container {
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.ql-editor {
+  min-height: 200px;
+}
+
+.ql-editor p {
+  margin-bottom: 1em;
+}
+
+/* Placeholder styling */
+.ql-editor .placeholder {
+  color: #2563eb;
+  background-color: #dbeafe;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+  display: inline-block;
+}
+
+/* Toolbar styling */
+.ql-toolbar {
+  border-top-left-radius: 0.375rem;
+  border-top-right-radius: 0.375rem;
+  background-color: #f9fafb;
+}
+
+.ql-container {
+  border-bottom-left-radius: 0.375rem;
+  border-bottom-right-radius: 0.375rem;
+}
+
+/* Dark mode support */
+.dark .ql-toolbar {
+  background-color: #1f2937;
+  border-color: #374151;
+}
+
+.dark .ql-container {
+  background-color: #111827;
+  border-color: #374151;
+  color: #f9fafb;
+}
+
+.dark .ql-editor.ql-blank::before {
+  color: #6b7280;
+}
+
+.dark .ql-stroke {
+  stroke: #f9fafb !important;
+}
+
+.dark .ql-fill {
+  fill: #f9fafb !important;
+}
+
+.dark .ql-picker-label {
+  color: #f9fafb;
+}
+
+.dark .ql-picker-options {
+  background-color: #1f2937;
+}
