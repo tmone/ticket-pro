@@ -11,6 +11,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Check if this is a redirect request with code parameter
+  const hasCodeParam = request.nextUrl.searchParams.has('code');
+  if (request.nextUrl.pathname === '/' && hasCodeParam) {
+    // Allow access without authentication for redirect
+    return NextResponse.next();
+  }
+
   // Check if user is authenticated
   const isAuthenticated = request.cookies.get('auth-token');
 
