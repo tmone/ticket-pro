@@ -482,12 +482,8 @@ export async function POST(request: NextRequest) {
         const personalizedSubject = replacePlaceholders(subject);
         
         // Prepare HTML content
-        // Check if message is already HTML (from rich text editor)
-        let htmlContent = personalizedMessage;
-        if (!personalizedMessage.includes('<') || !personalizedMessage.includes('>')) {
-          // Plain text - convert newlines to <br>
-          htmlContent = personalizedMessage.replace(/\n/g, '<br>');
-        }
+        // Always preserve line breaks by converting \n to <br> while keeping existing HTML
+        let htmlContent = personalizedMessage.replace(/\n/g, '<br>');
         
         // If appendTicketInline is true, add the image as inline at the bottom
         if (appendTicketInline && jpgBuffer) {
