@@ -34,9 +34,11 @@ export async function POST(request: NextRequest) {
       }
     };
 
-    // Read the ticket.svg template
-    const svgPath = path.join(process.cwd(), 'public', 'ticket.svg');
-    const svgTemplate = fs.readFileSync(svgPath, 'utf-8');
+    // Read both ticket templates
+    const regularSvgPath = path.join(process.cwd(), 'public', 'ticket.svg');
+    const vipSvgPath = path.join(process.cwd(), 'public', 'ticket_vip.svg');
+    const regularSvgTemplate = fs.readFileSync(regularSvgPath, 'utf-8');
+    const vipSvgTemplate = fs.readFileSync(vipSvgPath, 'utf-8');
 
     // Create a ZIP archive
     const archive = archiver('zip', {
@@ -80,6 +82,26 @@ export async function POST(request: NextRequest) {
       
       await Promise.all(batch.map(async (ticket) => {
         try {
+          // Check if this ticket is for VIP
+          let isVip = false;
+          if (ticket.rowData) {
+            const vipColumnKey = Object.keys(ticket.rowData).find(key => 
+              key.toLowerCase() === 'vip'
+            );
+            
+            if (vipColumnKey) {
+              const vipValue = ticket.rowData[vipColumnKey];
+              isVip = vipValue && (
+                vipValue.toString() === '1' || 
+                vipValue.toString().toUpperCase() === 'X' || 
+                vipValue.toString().toLowerCase() === 'yes'
+              );
+            }
+          }
+          
+          // Select appropriate template
+          const svgTemplate = isVip ? vipSvgTemplate : regularSvgTemplate;
+          
           // Generate QR code SVG locally
           const qrSvgContent = await QRCode.toString(ticket.qrData, {
             type: 'svg',
@@ -98,21 +120,73 @@ export async function POST(request: NextRequest) {
             .replace(/<\/svg>/, '')
             .trim();
 
-          // Create QR code group with proper scaling
-          const scale = 368 / 29; // Scale factor to make QR code fill the entire area
-          const qrCodeGroup = `
-            <g transform="translate(1200, 284)">
-              <g transform="scale(${scale})">
-                ${qrCodeElements}
+          let ticketSvg = svgTemplate;
+          
+          // Handle QR code placement based on template type
+          if (isVip) {
+            // VIP template uses different coordinates
+            const vipScale = 226.72 / 29; // Scale factor for VIP QR code
+            const vipQrCodeGroup = `
+              <g transform="translate(1657.38, 787.36)">
+                <g transform="scale(${vipScale})">
+                  ${qrCodeElements}
+                </g>
               </g>
-            </g>
-          `;
-
-          // Replace placeholder with QR code in SVG
-          let ticketSvg = svgTemplate.replace(
-            /<rect x="1200" y="284" width="368" height="368" stroke="white" stroke-width="0" id="qr-code"\/>/,
-            qrCodeGroup
-          );
+            `;
+            ticketSvg = ticketSvg.replace(
+              /<rect[^>]*id="QR-CODE"[^>]*\/>/,
+              vipQrCodeGroup
+            );
+            
+            // Replace NAME and TITLE for VIP template
+            if (ticket.rowData) {
+              // Look for NAME column
+              const nameColumnKey = Object.keys(ticket.rowData).find(key => 
+                key.toLowerCase() === 'name' || key.toLowerCase() === 'tên' || key.toLowerCase() === 'họ tên'
+              );
+              if (nameColumnKey) {
+                const name = ticket.rowData[nameColumnKey] || '';
+                ticketSvg = ticketSvg.replace(
+                  /(<text[^>]*id="NAME"[^>]*?)([^>]*>)/,
+                  `$1 text-anchor="middle"$2`
+                );
+                ticketSvg = ticketSvg.replace(
+                  /(<text[^>]*id="NAME"[^>]*>[\s\S]*?<tspan[^>]*x=")[^"]*("[\s\S]*?>)[^<]*([\s\S]*?<\/tspan>[\s\S]*?<\/text>)/,
+                  `$1320$2${name}$3`
+                );
+              }
+              
+              // Look for TITLE column
+              const titleColumnKey = Object.keys(ticket.rowData).find(key => 
+                key.toLowerCase() === 'title' || key.toLowerCase() === 'chức vụ' || key.toLowerCase() === 'position'
+              );
+              if (titleColumnKey) {
+                const title = ticket.rowData[titleColumnKey] || '';
+                ticketSvg = ticketSvg.replace(
+                  /(<text[^>]*id="TITLE"[^>]*?)([^>]*>)/,
+                  `$1 text-anchor="middle"$2`
+                );
+                ticketSvg = ticketSvg.replace(
+                  /(<text[^>]*id="TITLE"[^>]*>[\s\S]*?<tspan[^>]*x=")[^"]*("[\s\S]*?>)[^<]*([\s\S]*?<\/tspan>[\s\S]*?<\/text>)/,
+                  `$1320$2${title}$3`
+                );
+              }
+            }
+          } else {
+            // Regular template
+            const scale = 368 / 29; // Scale factor to make QR code fill the entire area
+            const qrCodeGroup = `
+              <g transform="translate(1200, 284)">
+                <g transform="scale(${scale})">
+                  ${qrCodeElements}
+                </g>
+              </g>
+            `;
+            ticketSvg = ticketSvg.replace(
+              /<rect x="1200" y="284" width="368" height="368" stroke="white" stroke-width="0" id="qr-code"\/>/,
+              qrCodeGroup
+            );
+          }
 
           // Convert SVG to JPG using Sharp with optimized settings
           const jpgBuffer = await sharp(Buffer.from(ticketSvg))

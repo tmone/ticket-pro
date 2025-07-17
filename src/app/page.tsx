@@ -105,6 +105,7 @@ export default function DashboardPage() {
   const [qrCodeColumn, setQrCodeColumn] = React.useState<string>('');
   const [qrModalOpen, setQrModalOpen] = React.useState(false);
   const [qrModalData, setQrModalData] = React.useState<string>('');
+  const [qrModalRowData, setQrModalRowData] = React.useState<Record<string, any> | undefined>(undefined);
   const [isGeneratingTickets, setIsGeneratingTickets] = React.useState(false);
   const [ticketProgress, setTicketProgress] = React.useState({ current: 0, total: 0 });
   const [isEmailModalOpen, setIsEmailModalOpen] = React.useState(false);
@@ -354,6 +355,7 @@ export default function DashboardPage() {
     
     if (qrCodeColumn && row[qrCodeColumn]) {
       setQrModalData(String(row[qrCodeColumn]));
+      setQrModalRowData(row);
       setQrModalOpen(true);
     }
   };
@@ -1395,6 +1397,7 @@ export default function DashboardPage() {
         open={qrModalOpen}
         onOpenChange={setQrModalOpen}
         data={qrModalData}
+        rowData={qrModalRowData}
       />
       
       <EmailModal

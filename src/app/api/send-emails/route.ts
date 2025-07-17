@@ -293,7 +293,9 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    const svgTemplate = (attachTicket || appendTicketInline) ? fs.readFileSync(path.join(process.cwd(), 'public', 'ticket.svg'), 'utf-8') : null;
+    // Load both ticket templates
+    const regularSvgTemplate = (attachTicket || appendTicketInline) ? fs.readFileSync(path.join(process.cwd(), 'public', 'ticket.svg'), 'utf-8') : null;
+    const vipSvgTemplate = (attachTicket || appendTicketInline) ? fs.readFileSync(path.join(process.cwd(), 'public', 'ticket_vip.svg'), 'utf-8') : null;
     
     // Load email template
     const emailTemplatePath = path.join(process.cwd(), 'public', 'templates', 'email.eml');
@@ -375,12 +377,46 @@ export async function POST(request: NextRequest) {
         console.log('Ticket generation check:', {
           attachTicket,
           appendTicketInline,
-          hasTemplate: !!svgTemplate,
+          hasRegularTemplate: !!regularSvgTemplate,
+          hasVipTemplate: !!vipSvgTemplate,
           hasQrData: !!emailData.qrData,
-          shouldGenerate: (attachTicket || appendTicketInline) && svgTemplate && emailData.qrData
+          shouldGenerate: (attachTicket || appendTicketInline) && (regularSvgTemplate || vipSvgTemplate) && emailData.qrData
         });
 
-        if ((attachTicket || appendTicketInline) && svgTemplate && emailData.qrData) {
+        if ((attachTicket || appendTicketInline) && (regularSvgTemplate || vipSvgTemplate) && emailData.qrData) {
+          // Check if this attendee is VIP
+          let isVip = false;
+          if (emailData.rowData) {
+            // Find VIP column (case-insensitive search)
+            const vipColumnKey = Object.keys(emailData.rowData).find(key => 
+              key.toLowerCase() === 'vip'
+            );
+            
+            if (vipColumnKey) {
+              const vipValue = emailData.rowData[vipColumnKey];
+              // Check for VIP values: '1', 'X', 'Yes' (case-insensitive)
+              isVip = vipValue && (
+                vipValue.toString() === '1' || 
+                vipValue.toString().toUpperCase() === 'X' || 
+                vipValue.toString().toLowerCase() === 'yes'
+              );
+            }
+          }
+          
+          // Select appropriate template
+          const svgTemplate = isVip ? vipSvgTemplate : regularSvgTemplate;
+          if (!svgTemplate) {
+            console.error(`Template not found: ${isVip ? 'ticket_vip.svg' : 'ticket.svg'}`);
+            throw new Error('Ticket template not found');
+          }
+          
+          console.log('Ticket template selection:', {
+            email: emailData.email,
+            isVip,
+            template: isVip ? 'ticket_vip.svg' : 'ticket.svg',
+            vipData: emailData.rowData?.VIP || emailData.rowData?.vip
+          });
+          
           // Generate QR code and ticket
           const qrSvgContent = await QRCode.toString(emailData.qrData, {
             type: 'svg',
@@ -407,10 +443,77 @@ export async function POST(request: NextRequest) {
             </g>
           `;
 
-          const ticketSvg = svgTemplate.replace(
-            /<rect x="1200" y="284" width="368" height="368" stroke="white" stroke-width="0" id="qr-code"\/>/,
-            qrCodeGroup
-          );
+          let ticketSvg = svgTemplate;
+          
+          // For VIP template, handle different QR code placement
+          if (isVip) {
+            // VIP template uses different coordinates: x="1657.38" y="787.36" width="226.72" height="226.72"
+            const vipScale = 226.72 / 29; // Scale factor for VIP QR code
+            const vipQrCodeGroup = `
+              <g transform="translate(1657.38, 787.36)">
+                <g transform="scale(${vipScale})">
+                  ${qrCodeElements}
+                </g>
+              </g>
+            `;
+            ticketSvg = ticketSvg.replace(
+              /<rect[^>]*id="QR-CODE"[^>]*\/>/,
+              vipQrCodeGroup
+            );
+          } else {
+            // Regular template
+            ticketSvg = ticketSvg.replace(
+              /<rect x="1200" y="284" width="368" height="368" stroke="white" stroke-width="0" id="qr-code"\/>/,
+              qrCodeGroup
+            );
+          }
+          
+          // Replace NAME and TITLE in the template
+          if (emailData.rowData) {
+            // Look for NAME column
+            const nameColumnKey = Object.keys(emailData.rowData).find(key => 
+              key.toLowerCase() === 'name' || key.toLowerCase() === 'tên' || key.toLowerCase() === 'họ tên'
+            );
+            if (nameColumnKey) {
+              const name = emailData.rowData[nameColumnKey] || '';
+              if (isVip) {
+                // For VIP template, center the text
+                ticketSvg = ticketSvg.replace(
+                  /(<text[^>]*id="NAME"[^>]*?)([^>]*>)/,
+                  `$1 text-anchor="middle"$2`
+                );
+                ticketSvg = ticketSvg.replace(
+                  /(<text[^>]*id="NAME"[^>]*>[\s\S]*?<tspan[^>]*x=")[^"]*("[\s\S]*?>)[^<]*([\s\S]*?<\/tspan>[\s\S]*?<\/text>)/,
+                  `$1320$2${name}$3`
+                );
+              } else {
+                // For regular template (if it uses placeholders)
+                ticketSvg = ticketSvg.replace(/\{NAME\}/g, name);
+              }
+            }
+            
+            // Look for TITLE column
+            const titleColumnKey = Object.keys(emailData.rowData).find(key => 
+              key.toLowerCase() === 'title' || key.toLowerCase() === 'chức vụ' || key.toLowerCase() === 'position'
+            );
+            if (titleColumnKey) {
+              const title = emailData.rowData[titleColumnKey] || '';
+              if (isVip) {
+                // For VIP template, center the text
+                ticketSvg = ticketSvg.replace(
+                  /(<text[^>]*id="TITLE"[^>]*?)([^>]*>)/,
+                  `$1 text-anchor="middle"$2`
+                );
+                ticketSvg = ticketSvg.replace(
+                  /(<text[^>]*id="TITLE"[^>]*>[\s\S]*?<tspan[^>]*x=")[^"]*("[\s\S]*?>)[^<]*([\s\S]*?<\/tspan>[\s\S]*?<\/text>)/,
+                  `$1320$2${title}$3`
+                );
+              } else {
+                // For regular template (if it uses placeholders)
+                ticketSvg = ticketSvg.replace(/\{TITLE\}/g, title);
+              }
+            }
+          }
 
           // Convert to JPG
           jpgBuffer = await sharp(Buffer.from(ticketSvg))

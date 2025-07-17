@@ -8,13 +8,22 @@ export async function POST(request: NextRequest) {
   try {
     const { password } = await request.json();
 
+    // Debug logging
+    console.log('Login attempt:', {
+      inputPassword: password,
+      envPassword: ADMIN_PASSWORD,
+      match: password === ADMIN_PASSWORD,
+      inputLength: password?.length,
+      envLength: ADMIN_PASSWORD?.length
+    });
+
     // Validate password
     if (password === ADMIN_PASSWORD) {
       // Create a simple token (in production, use JWT or proper session management)
       const token = Buffer.from(`admin:${Date.now()}`).toString('base64');
       
       // Set cookie
-      cookies().set('auth-token', token, {
+      (await cookies()).set('auth-token', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',

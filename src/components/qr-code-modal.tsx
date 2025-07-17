@@ -8,9 +8,10 @@ interface QRCodeModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   data: string;
+  rowData?: Record<string, any>;
 }
 
-export function QRCodeModal({ open, onOpenChange, data }: QRCodeModalProps) {
+export function QRCodeModal({ open, onOpenChange, data, rowData }: QRCodeModalProps) {
   const { toast } = useToast();
   const [ticketSvg, setTicketSvg] = React.useState<string>('');
   const [isLoading, setIsLoading] = React.useState(false);
@@ -27,7 +28,7 @@ export function QRCodeModal({ open, onOpenChange, data }: QRCodeModalProps) {
       const response = await fetch('/api/generate-ticket', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ qrData: data }),
+        body: JSON.stringify({ qrData: data, rowData }),
       });
 
       if (response.ok) {
